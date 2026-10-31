@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Facturas por pagar</title>
+    <style>
+        body { font-family: Arial, sans-serif; color: #1f2937; line-height: 1.6; background: #f9fafb; padding: 20px; }
+        .container { max-width: 600px; margin: 0 auto; background: #ffffff; padding: 32px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+        h1 { color: #047857; margin-top: 0; font-size: 22px; }
+        table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+        td { padding: 8px 0; border-bottom: 1px solid #e5e7eb; font-size: 14px; }
+        .amount { text-align: right; font-weight: 600; }
+        .overdue { color: #b91c1c; font-weight: 600; }
+        .btn { display: inline-block; padding: 12px 24px; background: #047857; color: #fff; text-decoration: none; border-radius: 8px; font-weight: 600; }
+        .footer { margin-top: 32px; font-size: 12px; color: #6b7280; text-align: center; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Hola {{ full_name }}, tienes facturas por pagar</h1>
+        <table>
+            {% for bill in bills %}
+            <tr>
+                <td>{{ bill.name }}<br>
+                    {% if bill.overdue %}<span class="overdue">Vencida el {{ bill.due_date|date:"d/m/Y" }}</span>
+                    {% else %}Vence el {{ bill.due_date|date:"d/m/Y" }}{% endif %}
+                </td>
+                <td class="amount">{{ bill.amount }} {{ bill.currency }}</td>
+            </tr>
+            {% endfor %}
+        </table>
+        {% if missing_recurring %}
+        <p><strong>Aún no has subido estas facturas habituales:</strong></p>
+        <ul>
+            {% for item in missing_recurring %}
+            <li>{{ item.name }} (esperada el {{ item.next_expected|date:"d/m/Y" }})</li>
+            {% endfor %}
+        </ul>
+        {% endif %}
+        <p><a class="btn" href="{{ frontend_url }}/payables">Ver pendientes</a></p>
+        <div class="footer">
+            <p>© ReceiptFlow. Recibes este aviso porque tienes facturas sin pagar.</p>
+        </div>
+    </div>
+</body>
+</html>
