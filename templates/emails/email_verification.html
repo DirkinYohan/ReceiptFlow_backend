@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Verifica tu correo electrónico</title>
+    <style>
+        body { font-family: Arial, sans-serif; color: #1f2937; background: #f9fafb; padding: 20px; }
+        .container { max-width: 600px; margin: 0 auto; background: #ffffff; padding: 32px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+        h1 { color: #2563eb; margin-top: 0; }
+        .btn { display: inline-block; padding: 12px 24px; background: #2563eb; color: #fff; text-decoration: none; border-radius: 8px; font-weight: 600; }
+        .small { font-size: 12px; color: #6b7280; word-break: break-all; }
+        .footer { margin-top: 32px; font-size: 12px; color: #6b7280; text-align: center; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Verifica tu correo electrónico</h1>
+        <p>Hola {{ full_name }},</p>
+        <p>Gracias por registrarte en ReceiptFlow. Haz clic en el siguiente enlace para confirmar tu cuenta (válido por {{ expire_hours }} horas):</p>
+        <p><a class="btn" href="{{ verify_url }}">Confirmar mi correo electrónico</a></p>
+        <p class="small">Si no puedes hacer clic, copia y pega esta URL en tu navegador: {{ verify_url }}</p>
+        <div class="footer">
+            <p>Si no solicitaste este correo, puedes ignorarlo con seguridad.</p>
+        </div>
+    </div>
+</body>
+</html>
