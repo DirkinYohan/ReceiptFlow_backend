@@ -97,7 +97,7 @@ class CategoryBudget(models.Model):
         constraints = [
             models.UniqueConstraint(fields=['user', 'category'], name='unique_user_category_budget'),
             models.CheckConstraint(
-                check=models.Q(monthly_amount__gt=0), name='category_budget_amount_positive',
+                condition=models.Q(monthly_amount__gt=0), name='category_budget_amount_positive',
             ),
         ]
 

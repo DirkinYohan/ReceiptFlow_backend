@@ -124,10 +124,10 @@ class Expense(models.Model):
             models.Index(fields=['user', 'currency']),
         ]
         constraints = [
-            models.CheckConstraint(check=models.Q(amount__gte=0), name='expense_amount_non_negative'),
-            models.CheckConstraint(check=models.Q(tax_amount__gte=0), name='expense_tax_non_negative'),
-            models.CheckConstraint(check=models.Q(discount_amount__gte=0), name='expense_discount_non_negative'),
-            models.CheckConstraint(check=models.Q(tip_amount__gte=0), name='expense_tip_non_negative'),
+            models.CheckConstraint(condition=models.Q(amount__gte=0), name='expense_amount_non_negative'),
+            models.CheckConstraint(condition=models.Q(tax_amount__gte=0), name='expense_tax_non_negative'),
+            models.CheckConstraint(condition=models.Q(discount_amount__gte=0), name='expense_discount_non_negative'),
+            models.CheckConstraint(condition=models.Q(tip_amount__gte=0), name='expense_tip_non_negative'),
         ]
 
     def __str__(self):

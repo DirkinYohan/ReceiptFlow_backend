@@ -38,6 +38,6 @@ class Migration(migrations.Migration):
         ),
         migrations.AddConstraint(
             model_name='categorybudget',
-            constraint=models.CheckConstraint(check=models.Q(('monthly_amount__gt', 0)), name='category_budget_amount_positive'),
+            constraint=models.CheckConstraint(condition=models.Q(('monthly_amount__gt', 0)), name='category_budget_amount_positive'),
         ),
     ]

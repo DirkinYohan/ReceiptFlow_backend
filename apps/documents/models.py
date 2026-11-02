@@ -182,7 +182,7 @@ class Document(models.Model):
         ]
         constraints = [
             models.CheckConstraint(
-                check=models.Q(processing_attempts__gte=0),
+                condition=models.Q(processing_attempts__gte=0),
                 name='document_processing_attempts_non_negative',
             ),
         ]
@@ -303,15 +303,15 @@ class ExpenseItem(models.Model):
         ]
         constraints = [
             models.CheckConstraint(
-                check=models.Q(quantity__gte=0),
+                condition=models.Q(quantity__gte=0),
                 name='expense_item_quantity_non_negative',
             ),
             models.CheckConstraint(
-                check=models.Q(unit_price__gte=0),
+                condition=models.Q(unit_price__gte=0),
                 name='expense_item_unit_price_non_negative',
             ),
             models.CheckConstraint(
-                check=models.Q(total_amount__gte=0),
+                condition=models.Q(total_amount__gte=0),
                 name='expense_item_total_non_negative',
             ),
         ]
