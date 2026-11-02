@@ -5,6 +5,7 @@ import os
 import re
 import tempfile
 import unicodedata
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, date, time
 from decimal import Decimal
@@ -1001,13 +1002,16 @@ class DocumentProcessor:
                      original_filename: str = '') -> ProcessedDocument:
         from services.extraction.post_validator import structured_extraction_failed
 
-        structured_doc = self._process_via_structured(file_path)
-        ocr_result = None
-        ocr_error = None
-        try:
-            ocr_result = extract_ocr(file_path, service_name=self.ocr_service_name)
-        except Exception as exc:
-            ocr_error = exc
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            structured_future = pool.submit(self._process_via_structured, file_path)
+            ocr_future = pool.submit(extract_ocr, file_path, service_name=self.ocr_service_name)
+            ocr_result = None
+            ocr_error = None
+            try:
+                ocr_result = ocr_future.result()
+            except Exception as exc:
+                ocr_error = exc
+            structured_doc = structured_future.result()
 
         structured_ok = structured_doc is not None and not structured_extraction_failed(structured_doc)
         if structured_ok:

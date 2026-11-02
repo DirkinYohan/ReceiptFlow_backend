@@ -1,5 +1,5 @@
 # Render Blueprint: Dashboard -> New -> Blueprint -> this repository.
-# Free plan: one web service, no worker (documents are read during the upload request),
+# Free plan: one web service, no worker (documents are read in background threads of the web process),
 # no persistent disk (receipts go to Supabase Storage), sleeps after 15 min without traffic.
 services:
   - type: web
@@ -30,6 +30,8 @@ services:
         value: localhost
       - key: WEB_CONCURRENCY
         value: "2"
+      - key: DOCUMENT_BACKGROUND_THREADS
+        value: "true"
       # --- Database (Supabase, Session pooler) ---
       - key: DB_HOST
         sync: false

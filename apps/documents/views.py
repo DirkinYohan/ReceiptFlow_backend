@@ -161,8 +161,8 @@ class DocumentViewSet(viewsets.ModelViewSet):
             )
 
         try:
-            from .tasks import process_document_task
-            transaction.on_commit(lambda: process_document_task.delay(document_id=document.pk))
+            from .background import schedule_document_processing
+            transaction.on_commit(lambda: schedule_document_processing(document.pk))
         except Exception as exc:
             logger.warning('Could not enqueue async processing task for %s: %s', document.pk, exc)
 
@@ -322,7 +322,8 @@ class DocumentViewSet(viewsets.ModelViewSet):
 
         document.mark_processing()
         try:
-            task_result = process_document_task.delay(document_id=document.pk)
+            from .background import schedule_document_processing
+            task_result = schedule_document_processing(document.pk)
         except Exception as exc:
             logger.exception('Failed to enqueue process_document_task for %s', document.pk)
             document.mark_failed(f'No se pudo encolar la tarea: {exc}')

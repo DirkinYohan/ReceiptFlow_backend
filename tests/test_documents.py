@@ -105,3 +105,58 @@ class TestDocumentUpload:
         assert data['completed'] == 1
         assert data['pending'] == 1
         assert float(data['total_amount_sum']) >= 500
+
+
+@pytest.mark.django_db
+class TestBackgroundProcessing:
+    def test_upload_returns_before_processing_and_runs_task_in_thread(
+        self, auth_client, settings, django_capture_on_commit_callbacks,
+    ):
+        import threading
+        from unittest.mock import patch
+
+        from apps.documents import background
+
+        settings.DOCUMENT_BACKGROUND_THREADS = True
+        seen = {}
+        done = threading.Event()
+
+        def fake_apply(kwargs):
+            seen['document_id'] = kwargs['document_id']
+            seen['thread'] = threading.current_thread().name
+            done.set()
+
+        file_obj = SimpleUploadedFile('fondo.png', _small_png_bytes(), content_type='image/png')
+        with patch('apps.documents.tasks.process_document_task.apply', side_effect=fake_apply), \
+                patch.object(background, 'connections'):
+            with django_capture_on_commit_callbacks(execute=True):
+                response = auth_client.post('/api/v1/documents/', {'file': file_obj}, format='multipart')
+            assert done.wait(5)
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert response.json()['data']['status'] == Document.STATUS_PENDING
+        assert seen['document_id'] == response.json()['data']['id']
+        assert seen['thread'].startswith('receiptflow-document')
+
+
+class TestParallelExtraction:
+    def test_structured_and_ocr_calls_overlap(self):
+        import threading
+        from unittest.mock import patch
+
+        from services.document_processor.processor import DocumentProcessor
+
+        both_started = threading.Barrier(2, timeout=5)
+
+        def structured(_self, _path):
+            both_started.wait()
+            return None
+
+        def ocr(_path, service_name=None):
+            both_started.wait()
+            raise RuntimeError('ocr unavailable')
+
+        with patch.object(DocumentProcessor, '_process_via_structured', structured), \
+                patch('services.document_processor.processor.extract_ocr', side_effect=ocr):
+            with pytest.raises(RuntimeError, match='ocr unavailable'):
+                DocumentProcessor().process_file('missing.png')
