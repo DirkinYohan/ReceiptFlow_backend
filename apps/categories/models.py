@@ -84,7 +84,6 @@ class CategoryBudget(models.Model):
     )
     monthly_amount = models.DecimalField('Presupuesto mensual', max_digits=12, decimal_places=2)
     currency = models.CharField('Moneda', max_length=3, default='COP')
-    # First day of the month in which each alert was already emailed, so it goes out once a month.
     warning_sent_for = models.DateField('Aviso 80% enviado (mes)', null=True, blank=True)
     exceeded_sent_for = models.DateField('Aviso 100% enviado (mes)', null=True, blank=True)
     created_at = models.DateTimeField('Fecha de creación', auto_now_add=True)

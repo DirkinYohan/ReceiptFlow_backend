@@ -1,4 +1,3 @@
-"""API messages follow the app's language (Accept-Language)."""
 import pytest
 
 from apps.common.i18n import MESSAGES, translate_message, translate_payload
@@ -27,7 +26,7 @@ def test_only_message_fields_are_translated():
     out = translate_payload(payload)
     assert out['message'] == 'Supplier not found.'
     assert out['errors'][0]['message'] == 'The passwords do not match.'
-    assert out['data'] == payload['data']  # user data is never touched
+    assert out['data'] == payload['data']
 
 
 @pytest.mark.django_db

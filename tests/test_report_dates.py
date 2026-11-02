@@ -1,4 +1,3 @@
-"""Report date ranges are whole local days, and averages use what was actually paid."""
 from datetime import datetime, time, timedelta
 from decimal import Decimal
 

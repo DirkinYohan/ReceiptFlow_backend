@@ -1,4 +1,3 @@
-"""Detect recurring expenses per supplier and tell which ones are due or missing."""
 from __future__ import annotations
 
 from datetime import date, timedelta
@@ -11,7 +10,6 @@ from django.utils import timezone
 from apps.documents.payables import BILL_CLASSES
 from apps.expenses.models import Expense
 
-# (frequency, min interval days, max interval days, nominal period days)
 FREQUENCY_WINDOWS = [
     (Expense.RECURRENCE_WEEKLY, 5, 9, 7),
     (Expense.RECURRENCE_BIWEEKLY, 12, 17, 14),
@@ -40,19 +38,16 @@ def detect_frequency(expenses: list[Expense]) -> Optional[str]:
     if len(days) >= 2:
         intervals = [(b - a).days for a, b in zip(days, days[1:])]
         frequency = _frequency_for_interval(median(intervals))
-        # The median alone lies with few points (4 and 162 days -> "quarterly"): most gaps must agree.
         allowed_outliers = 1 if len(intervals) >= 3 else 0
         matching = sum(1 for gap in intervals if _frequency_for_interval(gap) == frequency)
         if frequency and matching >= len(intervals) - allowed_outliers:
             return frequency
-    # A single utility bill (water, power, gas, phone) is monthly by nature.
     if any(_is_bill(e) for e in expenses):
         return Expense.RECURRENCE_MONTHLY
     return None
 
 
 def refresh_supplier_recurrence(user, supplier) -> Optional[str]:
-    """Mark the supplier's expenses as recurring when a pattern shows up. Manual choices are kept."""
     if supplier is None:
         return None
     expenses = list(

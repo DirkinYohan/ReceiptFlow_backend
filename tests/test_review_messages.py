@@ -1,4 +1,3 @@
-"""Readable review reasons and the phone-as-NIT guard."""
 from apps.documents.review_messages import GENERIC, PRODUCTS_DONT_ADD_UP, humanize, humanize_all
 from services.extraction.schemas import ExtractedDocument
 
@@ -58,8 +57,6 @@ class TestPhoneIsNotTaxId:
 
 
 class TestSettledReceipt:
-    """University receipt: 'Pext Seminario 185,000' and 'BANCOLOMBIA -185,000' -> valor a pagar 0."""
-
     SECTIONS = [{
         'name': 'Conceptos',
         'columns': ['Conceptos', 'Valor'],

@@ -22,7 +22,6 @@ from apps.suppliers.models import Supplier
 User = get_user_model()
 
 
-# What the user actually paid for an expense (same formula as Expense.total_amount).
 EXPENSE_TOTAL = ExpressionWrapper(
     F('amount') + F('tax_amount') - F('discount_amount') + F('tip_amount'),
     output_field=DecimalField(max_digits=14, decimal_places=2),
@@ -30,14 +29,11 @@ EXPENSE_TOTAL = ExpressionWrapper(
 
 
 def count_rows(queryset):
-    """COUNT(*) of a correlated queryset as a scalar subquery."""
-    # Group by a constant so COUNT works inside a scalar subquery.
     rows = queryset.order_by().annotate(_one=Value(1)).values('_one').annotate(total=Count('pk')).values('total')
     return Coalesce(Subquery(rows, output_field=IntegerField()), 0)
 
 
 def _parse_bound(value: Optional[str], end: bool = False) -> Optional[datetime]:
-    """'2026-10-31' is a whole local day: start of it, or its last instant when it closes the range."""
     if not value:
         return None
     value = value.strip()
@@ -78,7 +74,6 @@ class DashboardViewSet(viewsets.ViewSet):
         previous_start = start_date - (end_date - start_date)
         current = Q(incurred_at__gte=start_date, incurred_at__lte=end_date)
         previous = Q(incurred_at__gte=previous_start, incurred_at__lt=start_date)
-        # One query for both periods (the previous one only feeds the variation %).
         expense_stats = Expense.objects.filter(user=user, incurred_at__gte=previous_start, incurred_at__lte=end_date).aggregate(
             total=Sum(EXPENSE_TOTAL, filter=current, default=Decimal('0')),
             count=Count('id', filter=current),
@@ -94,7 +89,6 @@ class DashboardViewSet(viewsets.ViewSet):
         else:
             change_pct = 0.0 if expense_total == 0 else 100.0
 
-        # Document and catalogue counts in a single row.
         in_period = Document.objects.filter(user=OuterRef('pk'), created_at__gte=start_date, created_at__lte=end_date)
         counts = User.objects.filter(pk=user.pk).annotate(
             documents_total=count_rows(in_period),

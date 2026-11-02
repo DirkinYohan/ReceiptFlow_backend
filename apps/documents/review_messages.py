@@ -1,4 +1,3 @@
-"""Turn the extractor's technical warnings into reasons a person can act on, in Spanish or English."""
 from __future__ import annotations
 
 import re
@@ -9,7 +8,6 @@ _NUMBER = r'(-?\d+(?:\.\d+)?)'
 _TOTAL_MISMATCH = re.compile(rf'={_NUMBER}\s+vs\s+total_amount={_NUMBER}')
 _SUBTOTAL_PARTS = re.compile(rf'subtotal\({_NUMBER}\)\+taxes\({_NUMBER}\)')
 
-# Codes that only describe how the document was read: nothing for the user to fix.
 _SILENT = (
     'GEMINI_MODEL_USED', 'GEMINI_STRUCTURED_OUTPUT_ENABLED', 'DATE_ROLE_ADJUSTED',
     'TAXABLE_BASE_RECONCILED', 'SECTION_TABLES_SPLIT', 'INVOICE_NUMBER_RELABELED',
@@ -78,7 +76,6 @@ _TEXT = {
     },
 }
 
-# Reasons the backend already writes in Spanish, with their English version.
 _PLAIN_EN = [
     (re.compile(r'^No se identificó el monto total\.$'), 'The total amount was not found.'),
     (re.compile(r'^No se identificó el nombre del proveedor\.$'), "The supplier's name was not found."),
@@ -92,7 +89,6 @@ _PLAIN_EN = [
      'You already uploaded this file (document #{0}). Discard it, or approve it if it really is another expense.'),
     (re.compile(r'^Posible documento duplicado: ya existe el documento #(\d+) .*número \(([^)]*)\) y total \(([^)]*)\)\.$'),
      'Possible duplicate: document #{0} already has the same supplier, number ({1}) and total ({2}).'),
-    # Processing failures stored by the Celery task.
     (re.compile(r'^Fallo el procesamiento\.\s*(.*)$', re.S), 'Reading failed. {0}'),
     (re.compile(r'^Error transitorio\. Reintentando \((\d+)/(\d+)\)\.\.\.$'), 'Temporary error. Retrying ({0}/{1})...'),
     (re.compile(r'^Tiempo de procesamiento excedido\.\s*(.*)$', re.S), 'Reading took too long. {0}'),
@@ -101,7 +97,6 @@ _PLAIN_EN = [
      'Reading marked as stuck ({0} min without a response).'),
 ]
 
-# Kept for callers that compare against the Spanish wording.
 PRODUCTS_DONT_ADD_UP = _TEXT['es']['products']
 GENERIC = _TEXT['es']['generic']
 QUOTA_EXHAUSTED = _TEXT['es']['quota']
@@ -139,11 +134,10 @@ def _plain(text: str, lang: str) -> str:
         match = pattern.match(text)
         if match:
             return english.format(*match.groups())
-    return text  # free text from the AI stays as it was written
+    return text
 
 
 def humanize(warning: str, currency: str = '', lang: str = 'es') -> Optional[str]:
-    """One readable sentence, or None when the warning is not something the user needs to see."""
     words = _TEXT.get(lang, _TEXT['es'])
     text = (warning or '').strip()
     if not text:
@@ -152,7 +146,7 @@ def humanize(warning: str, currency: str = '', lang: str = 'es') -> Optional[str
         return words['quota']
     code = _code(text)
     if code is None:
-        return _plain(text, lang)  # already written for people (e.g. "No se identificó el monto total.")
+        return _plain(text, lang)
     if code.startswith(_SILENT):
         return None
     if code.startswith(_PRODUCT_CODES):

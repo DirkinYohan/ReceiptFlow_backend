@@ -7,7 +7,6 @@ from django_ratelimit.decorators import ratelimit
 
 
 def get_ratelimit_rate(setting_key: str, default: str) -> Callable:
-    """Return a callable that fetches the rate limit dynamically from settings."""
     def _rate_getter(group, request):
         return getattr(settings, setting_key, default)
     return _rate_getter

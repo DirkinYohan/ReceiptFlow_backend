@@ -62,7 +62,6 @@ class RegisterView(generics.CreateAPIView):
         }
 
         if settings.EMAIL_VERIFICATION_REQUIRED and not user.is_email_verified:
-            # No se emiten tokens: la cuenta debe verificar el correo antes de ingresar.
             payload['message'] = (
                 'Te enviamos un correo de verificación. Revisa tu bandeja de entrada '
                 'y haz clic en el enlace para activar tu cuenta antes de iniciar sesión.'

@@ -62,7 +62,6 @@ def validate_uploaded_file(
             f'El archivo excede el tamaño máximo permitido ({max_size_mb}MB).'
         )
 
-    # Magic bytes verification for allowed types
     if getattr(settings, 'STRICT_MIME_VERIFICATION', True):
         pos = file_obj.tell() if hasattr(file_obj, 'tell') else 0
         header = b''
@@ -98,7 +97,6 @@ def validate_uploaded_file(
                 raise ValidationError(
                     f'El contenido del archivo no corresponde a un formato .{ext} válido o está corrupto.'
                 )
-
 
 
 class ValidatedFileField(serializers.FileField):

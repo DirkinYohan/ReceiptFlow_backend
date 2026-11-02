@@ -140,7 +140,7 @@ class DocumentService:
                 except Exception as exc:
                     logger.warning('Could not delete file for document %s: %s', document.id, exc)
             document.line_items.all().delete()
-            document.delete()  # cascades to the expense registered from it
+            document.delete()
 
 
 document_service = DocumentService

@@ -1,4 +1,3 @@
-"""Category budgets with alerts, and the accounting export."""
 import csv
 import io
 from datetime import timedelta
@@ -119,7 +118,7 @@ class TestExport:
         workbook = load_workbook(io.BytesIO(response.content))
         assert workbook.sheetnames == ['Gastos', 'Por categoría', 'Por proveedor']
         sheet = workbook['Gastos']
-        assert sheet.max_row == 3  # header, one expense, total row
+        assert sheet.max_row == 3
         assert workbook['Por categoría'].cell(row=2, column=1).value == food.name
 
     def test_bad_format(self, auth_client):

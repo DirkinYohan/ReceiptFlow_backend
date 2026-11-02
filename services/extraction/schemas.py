@@ -33,8 +33,6 @@ _SPANISH_MONTHS = {
     'diciembre': 12, 'dic': 12, 'december': 12, 'dec': 12,
 }
 
-# document_type values that are really a finer kind. Mapped to the
-# Document model choices (invoice/receipt/ticket/other) and preserved in document_kind.
 _KIND_FROM_TYPE = {
     'commercial_invoice': 'commercial_invoice',
     'factura_comercial': 'commercial_invoice',
@@ -146,7 +144,6 @@ def _safe_iso(year: int, month: int, day: int) -> Optional[str]:
 
 
 def _try_iso_date(value: str) -> Optional[str]:
-    """Normalize a printed date to YYYY-MM-DD. Colombian day/month/year by default."""
     text = value.strip()
     text = re.sub(r'[T\s]\d{1,2}:\d{2}(?::\d{2})?.*$', '', text).strip()
     match = re.fullmatch(r'(\d{4})[-/](\d{1,2})[-/](\d{1,2})', text)
@@ -217,22 +214,22 @@ def _normalize_billing_period(value):
 class TaxItem(BaseModel):
     type: Optional[str] = Field(
         default=None,
-        description="IVA, INC, RETEFUENTE, RETEICA, RETEIVA, EXENTO, EXCLUIDO u OTRO. null si no es un impuesto impreso.",
+        description='IVA, INC, RETEFUENTE, RETEICA, RETEIVA, EXENTO, EXCLUIDO or OTRO. null if it is not a printed tax.',
     )
     rate: Optional[Decimal] = Field(
         default=None,
-        description="Tarifa impresa (19, 5, 0). Número JSON. null si no aparece. No asumas 19.",
+        description='Printed rate (19, 5, 0). JSON number. null if missing. Do not assume 19.',
     )
     taxable_base: Optional[Decimal] = Field(
         default=None,
         description=(
-            "Base gravable de este impuesto, si está impresa o se identifica en líneas concretas. "
-            "No uses el subtotal completo salvo que el impuesto grave todo el subtotal. null si no se puede determinar."
+            'Taxable base of this tax, if printed or tied to specific lines. Do not use the whole '
+            'subtotal unless the tax applies to all of it. null if it cannot be determined.'
         ),
     )
     amount: Optional[Decimal] = Field(
         default=None,
-        description="Valor del impuesto impreso, como número JSON sin separadores de miles. null si no aparece.",
+        description='Printed tax amount, as a JSON number without thousands separators. null if missing.',
     )
 
     @field_validator("rate", "taxable_base", "amount", mode="before")
@@ -250,8 +247,6 @@ _CELL_PLACEHOLDERS = {"-", "—", "–", "n/a", "na", "n.a.", "null", "none", "u
 
 
 class SectionCell(BaseModel):
-    """Una celda de una tabla impresa. El valor se conserva como texto."""
-
     column: Optional[str] = None
     value: Optional[str] = None
 
@@ -279,8 +274,6 @@ class SectionRow(BaseModel):
 
 
 class DocumentSection(BaseModel):
-    """Tabla tal como aparece en el documento. Las columnas no son fijas."""
-
     name: Optional[str] = None
     columns: List[str] = Field(default_factory=list)
     rows: List[SectionRow] = Field(default_factory=list)
@@ -299,8 +292,6 @@ class DocumentSection(BaseModel):
 
 
 class ServiceConcept(BaseModel):
-    """Cargo de un servicio público. No es un producto comercial."""
-
     description: Optional[str] = None
     amount: Optional[Decimal] = None
 
@@ -319,28 +310,28 @@ class LineItem(BaseModel):
     description: Optional[str] = Field(
         default=None,
         description=(
-            "Nombre del producto o servicio impreso en la tabla de detalle. "
-            "null si la fila es una fecha, lectura, NIT, CUFE, referencia, total o nota."
+            'Product or service name printed in the detail table. null if the row is a date, meter '
+            'reading, NIT, CUFE, reference, total or note.'
         ),
     )
     sku: Optional[str] = None
     quantity: Optional[Decimal] = Field(
         default=None,
-        description="Cantidad de la columna de cantidad. null si no está impresa. No uses 1 por defecto.",
+        description='Value of the quantity column. null if not printed. Do not default to 1.',
     )
     unit_price: Optional[Decimal] = Field(
         default=None,
-        description="Precio unitario impreso. Número JSON. null si la columna no existe o no se puede leer.",
+        description='Printed unit price. JSON number. null if the column does not exist or cannot be read.',
     )
     discount: Optional[Decimal] = Field(
         default=None,
-        description="Descuento de esa línea, si hay columna. null si no aparece.",
+        description='Discount of this line, if there is a column for it. null if missing.',
     )
     tax_rate: Optional[Decimal] = None
     tax_amount: Optional[Decimal] = None
     total: Optional[Decimal] = Field(
         default=None,
-        description="Total de la línea tal como está impreso. No lo calcules. null si no está.",
+        description='Line total exactly as printed. Do not compute it. null if missing.',
     )
 
     @field_validator("quantity", mode="after")
@@ -371,149 +362,150 @@ class LineItem(BaseModel):
 class ExtractedDocument(BaseModel):
     document_type: Optional[str] = Field(
         default=None,
-        description="invoice, receipt, ticket u other. Factura comercial o electrónica: invoice. Tirilla POS: ticket. Recibo: receipt.",
+        description='invoice, receipt, ticket or other. Commercial or electronic invoice: invoice. POS slip: ticket. Receipt: receipt.',
     )
     document_kind: Optional[str] = Field(
         default=None,
         description=(
-            "commercial_invoice, electronic_invoice, pos, public_service, service_invoice, receipt u other. "
-            "Agua, energía, gas, internet o telefonía: public_service. "
-            "Factura DIAN con CUFE: electronic_invoice. Tirilla: pos."
+            'commercial_invoice, electronic_invoice, pos, public_service, service_invoice, receipt or'
+            ' other. Water, power, gas, internet or phone: public_service. DIAN invoice with CUFE: '
+            'electronic_invoice. POS slip: pos.'
         ),
     )
     document_class: Optional[str] = Field(
         default=None,
         description=(
-            "SALES_INVOICE, ELECTRONIC_INVOICE, POS_RECEIPT, UTILITY_BILL, "
-            "ENERGY_BILL, WATER_BILL, GAS_BILL, TELECOM_BILL, RECEIPT, "
-            "SERVICE_INVOICE u OTHER. Clasifica antes de leer los montos."
+            'SALES_INVOICE, ELECTRONIC_INVOICE, POS_RECEIPT, UTILITY_BILL, ENERGY_BILL, WATER_BILL, '
+            'GAS_BILL, TELECOM_BILL, RECEIPT, SERVICE_INVOICE or OTHER. Classify before reading '
+            'amounts.'
         ),
     )
     has_product_table: Optional[bool] = Field(
         default=None,
         description=(
-            "true solo si existe una tabla o listado claro de productos o servicios con descripción y valor. "
-            "false en servicios públicos, documentos sin detalle, o cuando solo hay lecturas, fechas, NIT o totales."
+            'true only if there is a clear table or list of products or services with description and'
+            ' amount. false for utility bills, documents without detail, or when there are only '
+            'readings, dates, NIT or totals.'
         ),
     )
     supplier_name: Optional[str] = Field(
         default=None,
-        description="Razón social del emisor. No uses el nombre del cliente, adquiriente o suscriptor.",
+        description="Issuer's legal name. Never the customer's, buyer's or subscriber's name.",
     )
     supplier_tax_id: Optional[str] = Field(
         default=None,
-        description="NIT del emisor, solo dígitos, sin dígito de verificación. Nunca el número de factura.",
+        description="Issuer's NIT, digits only, without the check digit. Never the invoice number.",
     )
     supplier_tax_id_verification_digit: Optional[str] = Field(
         default=None,
-        description="Dígito de verificación del NIT del emisor (un solo dígito). null si no aparece.",
+        description="Check digit of the issuer's NIT (a single digit). null if missing.",
     )
     phone_numbers: List[str] = Field(
         default_factory=list,
-        description="Teléfonos impresos en el documento. Sirven para no confundirlos con el NIT.",
+        description='Phone numbers printed on the document, so they are not mistaken for the NIT.',
     )
     invoice_number: Optional[str] = Field(
         default=None,
         description=(
-            "Número de factura solo si la etiqueta es Factura No, Factura N°, Número de factura, "
-            "Factura de venta No, Nro Factura, Folio o Prefijo+consecutivo. "
-            "Nunca NIT, CUFE, CUDE, referencia, orden, contrato, medidor ni una fecha."
+            'Invoice number only when labelled Factura No, Factura N°, Número de factura, Factura de '
+            'venta No, Nro Factura, Folio or prefix+sequence. Never a NIT, CUFE, CUDE, reference, '
+            'order, contract, meter or date.'
         ),
     )
     issue_date: Optional[str] = Field(
         default=None,
-        description="Fecha de emisión o expedición en YYYY-MM-DD. null si esa etiqueta no está. No copies otra fecha aquí.",
+        description='Issue date as YYYY-MM-DD. null if that label is missing. Do not copy another date here.',
     )
     issue_time: Optional[str] = Field(
         default=None,
-        description="Hora de emisión HH:MM:SS. null si no está.",
+        description='Issue time as HH:MM:SS. null if missing.',
     )
     generation_date: Optional[str] = Field(
         default=None,
-        description="Fecha de generación DIAN en YYYY-MM-DD. null si no hay etiqueta de generación.",
+        description='DIAN generation date as YYYY-MM-DD. null if there is no generation label.',
     )
     due_date: Optional[str] = Field(
         default=None,
-        description="Fecha de vencimiento o pago en YYYY-MM-DD. null si no está. No la uses como fecha de emisión.",
+        description='Due or payment date as YYYY-MM-DD. null if missing. Never use it as the issue date.',
     )
     billing_period: Optional[str] = Field(
         default=None,
-        description="Periodo facturado, por ejemplo 2024-08. null si no está. No es un producto.",
+        description='Billed period, e.g. 2024-08. null if missing. It is not a product.',
     )
     billing_period_start: Optional[str] = Field(
         default=None,
-        description="Inicio del periodo facturado en YYYY-MM-DD. null si no está.",
+        description='Start of the billed period as YYYY-MM-DD. null if missing.',
     )
     billing_period_end: Optional[str] = Field(
         default=None,
-        description="Fin del periodo facturado en YYYY-MM-DD. null si no está.",
+        description='End of the billed period as YYYY-MM-DD. null if missing.',
     )
     suspension_date: Optional[str] = Field(
         default=None,
-        description="Fecha de suspensión del servicio en YYYY-MM-DD. null si no está.",
+        description='Service suspension date as YYYY-MM-DD. null if missing.',
     )
     payment_date: Optional[str] = Field(
         default=None,
-        description="Fecha de pago oportuno o fecha en que se pagó, YYYY-MM-DD. null si no está. No la copies en issue_date.",
+        description='Pay-by date or the date it was paid, YYYY-MM-DD. null if missing. Do not copy it into issue_date.',
     )
     currency: Optional[str] = Field(
         default=None,
-        description="COP si el documento es colombiano y no indica otra moneda. USD, EUR u otra solo si está impresa.",
+        description='COP if the document is Colombian and shows no other currency. USD, EUR or another only if printed.',
     )
     subtotal: Optional[Decimal] = Field(
         default=None,
-        description="Subtotal impreso. Número JSON sin separadores de miles. null si no está. No lo calcules.",
+        description='Printed subtotal. JSON number without thousands separators. null if missing. Do not compute it.',
     )
     other_charges: Optional[Decimal] = Field(
         default=None,
-        description="Otros conceptos a favor del total, si están impresos aparte del subtotal. null si no existen.",
+        description='Other charges added to the total, if printed apart from the subtotal. null if none.',
     )
     withholdings_amount: Optional[Decimal] = Field(
         default=None,
-        description="Retenciones que restan al total, si están impresas. null si no existen.",
+        description='Withholdings subtracted from the total, if printed. null if none.',
     )
     taxes: List[TaxItem] = Field(
         default_factory=list,
-        description="Impuestos impresos (IVA, INC, retenciones). Lista vacía si no hay. No inventes tarifas.",
+        description='Printed taxes (IVA, INC, withholdings). Empty list if none. Do not invent rates.',
     )
     total_amount: Optional[Decimal] = Field(
         default=None,
-        description="Total a pagar impreso. Número JSON. null si no está. No lo calcules a partir de otras cifras.",
+        description='Printed amount due. JSON number. null if missing. Do not derive it from other figures.',
     )
     payment_method: Optional[str] = Field(
         default=None,
-        description="cash, card, transfer, digital u other. null si no está indicado.",
+        description='cash, card, transfer, digital or other. null if not stated.',
     )
     cufe: Optional[str] = Field(
         default=None,
-        description="CUFE o CUDE hexadecimal de 64 a 96 caracteres. null si no es factura electrónica. No lo pongas como número de factura.",
+        description='Hexadecimal CUFE or CUDE, 64 to 96 characters. null if not an electronic invoice. Never use it as the invoice number.',
     )
     sections: List[DocumentSection] = Field(
         default_factory=list,
         description=(
-            "Tablas impresas, con las columnas que realmente tiene el documento. "
-            "No inventes Cantidad ni Precio Unitario si esas columnas no existen."
+            'Printed tables, with the columns the document really has. Do not invent quantity or unit'
+            ' price columns.'
         ),
     )
     service_concepts: List[ServiceConcept] = Field(
         default_factory=list,
         description=(
-            "Cargos de servicios públicos (acueducto, energía, gas). "
-            "Vacío en facturas comerciales. No pongas aquí lecturas ni históricos."
+            'Utility charges (water, power, gas). Empty for commercial invoices. No meter readings or'
+            ' history here.'
         ),
     )
     line_items: List[LineItem] = Field(
         default_factory=list,
         description=(
-            "Solo filas de una tabla de productos o servicios. Lista vacía si has_product_table es false. "
-            "Prohibido incluir fechas, lecturas, consumos, históricos, NIT, CUFE, referencias, "
-            "direcciones, teléfonos, totales, impuestos, observaciones o medios de pago."
+            'Only rows of a product or service table. Empty list if has_product_table is false. Never'
+            ' dates, readings, consumption, history, NIT, CUFE, references, addresses, phones, '
+            'totals, taxes, notes or payment methods.'
         ),
     )
     requires_review: bool = False
     validation_level: Optional[str] = Field(
         default=None,
-        description="confirmed, completed_with_warnings, review_required o failed. Lo asigna el backend.",
+        description='confirmed, completed_with_warnings, review_required or failed. Set by the backend.',
     )
     supplier_confidence: Optional[Decimal] = None
     invoice_number_confidence: Optional[Decimal] = None
@@ -522,7 +514,7 @@ class ExtractedDocument(BaseModel):
     line_items_confidence: Optional[Decimal] = None
     suggested_category: Optional[str] = Field(
         default=None,
-        description="Categoría del gasto, una de EXPENSE_CATEGORIES. null si no se puede inferir.",
+        description='Expense category, one of EXPENSE_CATEGORIES. null if it cannot be inferred.',
     )
     warnings: List[str] = Field(default_factory=list)
 
@@ -624,7 +616,6 @@ class ExtractedDocument(BaseModel):
 
     @model_validator(mode='after')
     def _drop_phone_as_tax_id(self):
-        """The model sometimes reads a phone number as the NIT (80296979597 -> 802969795-7)."""
         tax_digits = re.sub(r'\D', '', self.supplier_tax_id or '')
         if len(tax_digits) < 7:
             return self

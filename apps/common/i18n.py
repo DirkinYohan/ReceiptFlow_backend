@@ -1,9 +1,3 @@
-"""English versions of the API's Spanish messages.
-
-The API is written in Spanish. When the client asks for English (Accept-Language: en),
-ApiLanguageMiddleware passes the JSON response through translate_payload().
-Django and DRF's own messages are translated by LocaleMiddleware instead.
-"""
 from __future__ import annotations
 
 import json
@@ -11,7 +5,6 @@ import re
 from typing import Any
 
 MESSAGES = {
-    # Common errors
     'Has excedido el número máximo de solicitudes permitidas. Por favor, inténtalo de nuevo más tarde.':
         'You have exceeded the maximum number of requests. Please try again later.',
     'Error de integridad en la base de datos.': 'Database integrity error.',
@@ -20,12 +13,10 @@ MESSAGES = {
     'Ocurrió un error interno en el servidor.': 'An internal server error occurred.',
     'No tienes permiso para realizar esta acción.': 'You do not have permission to do this.',
     'Error desconocido.': 'Unknown error.',
-    # Uploaded files
     'No se ha proporcionado ningún archivo.': 'No file was provided.',
     'No se pudo determinar la extensión del archivo.': "The file's extension could not be determined.",
     'Se requiere un archivo para subir.': 'A file is required.',
     'El archivo no cumple los requisitos.': 'The file does not meet the requirements.',
-    # Documents
     'Documento subido correctamente.': 'Document uploaded.',
     'Detalle de documento.': 'Document details.',
     'Documentos.': 'Documents.',
@@ -48,7 +39,6 @@ MESSAGES = {
     'Datos del documento actualizados.': 'Document details updated.',
     'Documento en procesamiento.': 'Document being read.',
     'No puedes establecer el estado solicitado manualmente.': 'You cannot set that status by hand.',
-    # Expenses
     'El documento aún no tiene un monto total extraído.': 'The document does not have a total amount yet.',
     'No se pudo determinar la categoría del gasto.': "The expense's category could not be determined.",
     'Detalle de gasto.': 'Expense details.',
@@ -59,12 +49,10 @@ MESSAGES = {
     'Gasto eliminado correctamente.': 'Expense deleted.',
     'Formato no soportado. Usa xlsx o csv.': 'Unsupported format. Use xlsx or csv.',
     'Fechas inválidas. Usa AAAA-MM-DD.': 'Invalid dates. Use YYYY-MM-DD.',
-    # Categories, budgets and suppliers
     'El presupuesto debe ser mayor que cero.': 'The budget must be greater than zero.',
     'No puedes modificar categorías del sistema.': 'You cannot change system categories.',
     'No puedes eliminar categorías del sistema.': 'You cannot delete system categories.',
     'Favorito actualizado.': 'Favorite updated.',
-    # Users and authentication
     'Registro exitoso.': 'Registration complete.',
     'Te enviamos un correo de verificación. Revisa tu bandeja de entrada y haz clic en el enlace para activar tu cuenta antes de iniciar sesión.':
         'We sent you a verification email. Open it and click the link to activate your account before signing in.',
@@ -110,7 +98,6 @@ STATUS_NAMES = {
     'Error': 'Error',
 }
 
-# Messages that carry data: (Spanish pattern, English template with {0}, {1}…).
 PATTERNS = [
     (r'Tipo de archivo no permitido \(\.(.+?)\)\. Extensiones permitidas: (.+)\.',
      'File type not allowed (.{0}). Allowed extensions: {1}.'),
@@ -140,7 +127,6 @@ def translate_message(text: Any) -> Any:
 
 
 def translate_payload(data: Any, key: str = '') -> Any:
-    """Translate message-like fields; data fields (names, amounts, notes) are left alone."""
     if isinstance(data, dict):
         return {k: translate_payload(v, k) for k, v in data.items()}
     if isinstance(data, list):
@@ -158,8 +144,6 @@ def wants_english(request) -> bool:
 
 
 class ApiLanguageMiddleware:
-    """Serve the API's own messages in English when the client asks for it."""
-
     def __init__(self, get_response):
         self.get_response = get_response
 

@@ -1,4 +1,3 @@
-"""Accounting export of expenses: CSV for other software, Excel for people."""
 from __future__ import annotations
 
 import csv
@@ -79,7 +78,6 @@ def build_csv(expenses) -> bytes:
             value.isoformat() if hasattr(value, 'isoformat') else value
             for value in _row(expense)
         ])
-    # BOM so Excel opens the accents correctly.
     return ('﻿' + buffer.getvalue()).encode('utf-8')
 
 

@@ -421,7 +421,6 @@ def _as_decimal(value) -> Optional[Decimal]:
 
 
 def _sanitize_payload(data: dict) -> tuple[dict, list[str]]:
-    """Drop values that would reject the whole document in Pydantic."""
     warnings: list[str] = []
     items = data.get('line_items')
     if items is None:
@@ -461,12 +460,6 @@ def _sanitize_payload(data: dict) -> tuple[dict, list[str]]:
 
 
 class GeminiStructuredExtractor:
-    """Uses Gemini native structured output with a JSON schema.
-
-    Falls back to a JSON prompt with Pydantic validation if response_schema is not
-    supported by the current SDK/model. Always returns an ExtractedDocument.
-    """
-
     def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None):
         self._api_key = api_key or getattr(settings, 'GEMINI_API_KEY', '') or os.environ.get('GEMINI_API_KEY', '')
         self._default_model = model or getattr(settings, 'GEMINI_MODEL', 'gemini-3.5-flash')

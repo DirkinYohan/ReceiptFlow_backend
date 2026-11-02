@@ -47,7 +47,6 @@ _MONTH_NAMES = (
     "november", "december", "dec",
 )
 
-# Descriptions that are document metadata, not products. Matched on accent-folded text.
 _FAUX_PATTERNS = (
     re.compile(r'\blecturas?\s+(anterior|actual|inicial|final|medidor)\b'),
     re.compile(r'\bconsumo\s+(mes|del\s+mes|kwh|kw|m3|metros)\b'),
@@ -157,7 +156,6 @@ def _raw_looks_like_utility(raw_text: Optional[str]) -> bool:
 
 
 def _refine_document_class(doc: ExtractedDocument, raw_text_hint: Optional[str]) -> Optional[str]:
-    """Narrow a generic utility bill to energy, water or gas when the document says so."""
     current = (doc.document_class or '').upper()
     blob = _fold(f"{doc.supplier_name or ''} {doc.document_kind or ''} {raw_text_hint or ''}")
     if current in {'SALES_INVOICE', 'ELECTRONIC_INVOICE', 'POS_RECEIPT', 'TELECOM_BILL', 'RECEIPT'}:
@@ -180,7 +178,6 @@ def _refine_document_class(doc: ExtractedDocument, raw_text_hint: Optional[str])
 
 
 def _split_side_by_side_sections(sections: List[DocumentSection]) -> List[DocumentSection]:
-    """A water bill often prints two tables on one row. Keep them as two sections."""
     split: List[DocumentSection] = []
     for section in sections:
         folded = [_fold(column) for column in section.columns]
@@ -245,7 +242,6 @@ _INVOICE_LABEL = re.compile(
 
 
 def _header_role(column: str, has_meter: bool, has_charge: bool) -> Optional[str]:
-    """Tell a measurement header from a charge header. Shared names follow their table."""
     name = _fold(column)
     if any(hint in name for hint in _METER_HEADER):
         return 'measurement'
@@ -303,7 +299,6 @@ def _rows_for(section: DocumentSection, columns: List[str], indexes: List[int]) 
 
 
 def _split_measurement_from_charges(sections: List[DocumentSection]) -> List[DocumentSection]:
-    """Keep a meter reading table out of the charge table when both were returned as one."""
     split: List[DocumentSection] = []
     for section in sections:
         roles = _roles_for(section.columns)
@@ -346,7 +341,6 @@ def _date_after(text: str, label: str, window: int = 70) -> Optional[str]:
 
 
 def _header_issue_date(text: str, utility: bool) -> Optional[str]:
-    """The invoice date is the bare Fecha label, not límite, suspensión or último pago."""
     bare = _date_after(text, r'(?<![\w])fecha\s*:')
     issued = _date_after(text, r'fecha\s+de\s+(?:emisi[oó]n|expedici[oó]n)')
     if utility and bare:
@@ -387,7 +381,6 @@ def _labeled_invoice_numbers(text: str) -> List[str]:
 
 
 def _apply_labeled_fields(doc: ExtractedDocument, raw_text_hint: Optional[str], warn) -> ExtractedDocument:
-    """Use a printed label when it clearly names the invoice number or a date role."""
     if not raw_text_hint:
         return doc
     updates = {}
@@ -448,7 +441,6 @@ def _month_token(value: Optional[str]) -> bool:
 
 
 def _relocate_month_used_as_stratum(sections: List[DocumentSection]) -> List[DocumentSection]:
-    """A month name in the stratum column is the billed month, not the stratum number."""
     for section in sections:
         stratum_columns = [column for column in section.columns if 'estrato' in _fold(column)]
         month_columns = [column for column in section.columns if 'mes factur' in _fold(column)]
@@ -495,7 +487,6 @@ def _is_utility_document(doc: ExtractedDocument, raw_text_hint: Optional[str]) -
 
 
 def _relabel_utility_dates(doc: ExtractedDocument, raw_text_hint: Optional[str], warn) -> ExtractedDocument:
-    """Keep generation and payment dates out of issue_date and due_date on utility bills."""
     if not raw_text_hint or not _is_utility_document(doc, raw_text_hint):
         return doc
     folded = _fold(raw_text_hint)
@@ -563,12 +554,6 @@ def _parse_iso(value: Optional[str]) -> Optional[_date]:
 
 
 def validate_extracted(doc: ExtractedDocument, raw_text_hint: Optional[str] = None) -> ExtractedDocument:
-    """Validate Gemini output. Clears values that are clearly the wrong field.
-
-    Monetary amounts printed on the document are kept. Line items that are
-    dates, readings, tax ids or totals are removed. A suspicious invoice
-    number that is actually the NIT, the CUFE or a date is set to null.
-    """
     refined_class = _refine_document_class(doc, raw_text_hint)
     if refined_class != doc.document_class:
         doc = doc.model_copy(update={'document_class': refined_class})
@@ -576,7 +561,7 @@ def validate_extracted(doc: ExtractedDocument, raw_text_hint: Optional[str] = No
     warnings: List[str] = list(doc.warnings)
 
     def _warn(code: str, msg: Optional[str] = None, *, critical: bool = False) -> None:
-        del critical  # severity is decided from the code in business_rules
+        del critical
         text = code if msg is None else f"{code}: {msg}"
         if text not in warnings:
             warnings.append(text)

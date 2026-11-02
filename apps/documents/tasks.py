@@ -259,10 +259,6 @@ def cleanup_expired_password_reset_tokens():
 
 @shared_task(name='apps.documents.tasks.cleanup_orphan_media_files', ignore_result=True)
 def cleanup_orphan_media_files(dry_run: bool = False, hours_old: int = 24):
-    """
-    Scans media/documents/ (when using filesystem storage) and safely removes orphaned
-    files that have no corresponding Document record in the database and are older than `hours_old`.
-    """
     import os
     import time
     from pathlib import Path
@@ -275,7 +271,6 @@ def cleanup_orphan_media_files(dry_run: bool = False, hours_old: int = 24):
     if not docs_dir.exists():
         return {'status': 'skipped', 'reason': 'documents_dir_not_found'}
 
-    # Collect all known filenames from Document model
     known_files = set(Document.objects.exclude(file='').values_list('file', flat=True))
     known_filenames = {os.path.basename(f) for f in known_files if f}
 
@@ -302,9 +297,6 @@ def cleanup_orphan_media_files(dry_run: bool = False, hours_old: int = 24):
 
 @shared_task(name='apps.documents.tasks.cleanup_temporary_processing_files', ignore_result=True)
 def cleanup_temporary_processing_files(hours_old: int = 12):
-    """
-    Cleans up stale temporary files left behind during OCR processing or uploads.
-    """
     import tempfile
     import time
     from pathlib import Path
@@ -327,7 +319,6 @@ def cleanup_temporary_processing_files(hours_old: int = 12):
 
 @shared_task(name='apps.documents.tasks.send_due_reminders', ignore_result=True)
 def send_due_reminders():
-    """Daily email: unpaid bills due within a few days or overdue, plus recurring bills that never arrived."""
     from django.contrib.auth import get_user_model
 
     from apps.documents.payables import documents_needing_reminder, due_state

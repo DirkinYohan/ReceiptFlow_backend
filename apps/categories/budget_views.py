@@ -47,7 +47,6 @@ class CategoryBudgetViewSet(viewsets.ModelViewSet):
         return CategoryBudget.objects.filter(user=self.request.user).select_related('category', 'user')
 
     def create(self, request, *args, **kwargs):
-        # One budget per category: posting again for the same category updates it.
         existing = self.get_queryset().filter(category_id=request.data.get('category')).first()
         serializer = self.get_serializer(existing, data=request.data, partial=existing is not None)
         serializer.is_valid(raise_exception=True)

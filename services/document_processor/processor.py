@@ -26,7 +26,6 @@ logger = logging.getLogger(__name__)
 
 
 def _json_safe(value):
-    """Values stored in JSONField must survive the stdlib JSON encoder."""
     if isinstance(value, Decimal):
         return str(value)
     if isinstance(value, (datetime, date, time)):
@@ -41,7 +40,7 @@ def _json_safe(value):
 CURRENCY_SYMBOL_MAP = {
     'COP': 'COP',
     'COL$': 'COP',
-    '$': 'COP',  # In Colombia default $ is COP
+    '$': 'COP',
     'MXN': 'MXN',
     'MX$': 'MXN',
     'USD': 'USD',
@@ -117,17 +116,8 @@ def _normalize_text(text: str) -> str:
 
 
 def _find_colombian_nit(text: str, lines: list) -> Tuple[Optional[str], Optional[str], Optional[str]]:
-    """
-    Extracts Colombian NIT and Verification Digit (DV).
-    Returns (clean_nit_base, verification_digit, full_tax_id).
-    Examples:
-      NIT 900.123.456-7 -> ('900123456', '7', '900123456-7')
-      NIT: 800197268-4  -> ('800197268', '4', '800197268-4')
-      NIT 900123456 DV 1 -> ('900123456', '1', '900123456-1')
-    """
     full_text = ' '.join(lines[:25] + [text])
     
-    # Pattern 1: NIT with DV indicator or hyphen
     pattern_dv = re.compile(
         r'\bN\.?I\.?T\.?(?:\s+(?:EMISOR|DEL\s+EMISOR|PROVEEDOR|DE\s+VENTA))?[:\s\.]*([0-9]{1,3}(?:\.[0-9]{3}){2,3}|[0-9]{8,10})[\s\-–—]*(?:DV|D\.V\.?|VERIFICACION)?[\s\-–—:]*([0-9])\b',
         re.IGNORECASE,
@@ -139,7 +129,6 @@ def _find_colombian_nit(text: str, lines: list) -> Tuple[Optional[str], Optional
         if 8 <= len(raw_nit) <= 10:
             return raw_nit, dv, f'{raw_nit}-{dv}'
 
-    # Pattern 2: NIT without DV
     pattern_base = re.compile(
         r'\bN\.?I\.?T\.?(?:\s+(?:EMISOR|DEL\s+EMISOR|PROVEEDOR|DE\s+VENTA))?[:\s\.]*([0-9]{1,3}(?:\.[0-9]{3}){2,3}|[0-9]{8,10})\b',
         re.IGNORECASE,
@@ -150,7 +139,6 @@ def _find_colombian_nit(text: str, lines: list) -> Tuple[Optional[str], Optional
         if 8 <= len(raw_nit) <= 10:
             return raw_nit, None, raw_nit
 
-    # Generic foreign tax IDs (RFC, RUT, etc.)
     foreign_patterns = [
         (r'\bRFC[\s:=]*([A-ZÑ&]{3,4}\d{6}[A-Z0-9]{2,3})\b', 'MX'),
         (r'\bRUT[\s:=]*([0-9.\-]{10,12})\b', 'CL'),
@@ -168,20 +156,14 @@ def _find_colombian_nit(text: str, lines: list) -> Tuple[Optional[str], Optional
 
 
 def _find_cufe(text: str, lines: list) -> Optional[str]:
-    """
-    Extracts CUFE (Código Único de Factura Electrónica) or CUDE.
-    CUFE is a SHA-384 hex string (typically 64-96 characters).
-    """
     full = ' '.join(lines + [text])
     
-    # Labelled CUFE
     match = re.search(r'\b(?:CUFE|CUDE)[\s:=#]*([0-9a-fA-F\s\n]{64,128})', full, re.IGNORECASE)
     if match:
         clean = re.sub(r'[^0-9a-fA-F]', '', match.group(1)).lower()
         if len(clean) >= 64:
             return clean[:96]
 
-    # Continuous hex sequence
     match_hex = re.search(r'\b([0-9a-fA-F]{64,96})\b', full)
     if match_hex:
         return match_hex.group(1).lower()
@@ -190,13 +172,8 @@ def _find_cufe(text: str, lines: list) -> Optional[str]:
 
 
 def _find_document_number(text: str, lines: list) -> Optional[str]:
-    """
-    Extracts invoice / receipt number.
-    Prioritizes Colombian invoice numbers (e.g. SETP990001234, FE-1234, FAC 456).
-    """
     search_lines = lines[:35]
     
-    # Colombian electronic invoice pattern
     colombian_invoice_patterns = [
         r'(?:FACTURA\s+ELECTR[OÓ]NICA(?:\s+DE\s+VENTA)?|FACTURA\s+DE\s+VENTA|FACTURA|FAC\.)[\s:]*([A-Za-z0-9\-]{2,20})',
         r'\b(?:PREFIJO|SERIE)[:\s]*([A-Za-z0-9]+)[\s\-]+(?:N[O°º]|CONSECUTIVO|NUMERO)[:\s]*([0-9]+)',
@@ -220,16 +197,8 @@ def _find_document_number(text: str, lines: list) -> Optional[str]:
 
 
 def _find_spanish_datetime(text: str, lines: list) -> Tuple[Optional[datetime], Optional[str], Optional[str]]:
-    """
-    Parses date and time from text/lines, supporting Spanish textual formats:
-    - 15 de agosto de 2024
-    - 15/08/2024, 15-08-2024, 2024-08-15
-    - Issue time HH:MM:SS or HH:MM AM/PM
-    Returns (datetime_obj, date_str_iso, time_str_iso).
-    """
     all_text = ' '.join(lines[:35])
     
-    # 1. Spanish written date: DD de [Mes] de YYYY
     es_match = re.search(
         r'(\d{1,2})\s+de\s+([a-zA-Z]+)\s+de\s+(\d{4})',
         all_text,
@@ -247,7 +216,6 @@ def _find_spanish_datetime(text: str, lines: list) -> Tuple[Optional[datetime], 
             except ValueError:
                 pass
 
-    # 2. Standard numeric date patterns
     if not found_date:
         numeric_patterns = [
             (r'(\d{4})[-/](\d{1,2})[-/](\d{1,2})', 'YMD'),
@@ -278,7 +246,6 @@ def _find_spanish_datetime(text: str, lines: list) -> Tuple[Optional[datetime], 
             if found_date:
                 break
 
-    # 3. Extract time: HH:MM:SS or HH:MM AM/PM
     found_time: Optional[time] = None
     time_match = re.search(
         r'(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([AaPp][Mm])?',
@@ -310,7 +277,6 @@ def _find_spanish_datetime(text: str, lines: list) -> Tuple[Optional[datetime], 
 
 
 def _find_supplier_name(lines: list, text: str) -> Optional[str]:
-    """Identifies supplier company name from top lines of document."""
     candidates = []
     skip_keywords = [
         'fecha', 'total', 'subtotal', 'iva', 'rfc', 'nit', 'cuit', 'rut',
@@ -335,7 +301,6 @@ def _find_supplier_name(lines: list, text: str) -> Optional[str]:
             break
 
     if candidates:
-        # Return first reasonable name
         return candidates[0].strip()
     return None
 
@@ -371,7 +336,6 @@ def _find_currency(text: str, lines: list, has_nit: bool = False, has_cufe: bool
     if 'COP' in full or 'COL$' in full or 'PESOS COLOMBIANOS' in full:
         return 'COP'
     if has_nit or has_cufe or 'DIAN' in full or 'CUFE' in full or 'FACTURA ELECTRONICA' in full:
-        # Colombian invoice indicator present -> currency is COP unless explicitly stated otherwise
         if 'USD' not in full and 'EUR' not in full:
             return 'COP'
     for sym, code in [('USD', 'USD'), ('US$', 'USD'), ('EUR', 'EUR'), ('€', 'EUR'), ('MXN', 'MXN'), ('PEN', 'PEN')]:
@@ -381,9 +345,6 @@ def _find_currency(text: str, lines: list, has_nit: bool = False, has_cufe: bool
 
 
 def _find_financial_breakdown(lines: list, currency: str = 'COP') -> dict:
-    """
-    Extracts subtotal, taxes (IVA, INC), discounts, tip, withholdings, and total.
-    """
     subtotal: Optional[Decimal] = None
     tax_total: Optional[Decimal] = None
     iva_amount: Optional[Decimal] = None
@@ -411,41 +372,34 @@ def _find_financial_breakdown(lines: list, currency: str = 'COP') -> dict:
     for line in lines:
         upper = _normalize_text(line).upper()
 
-        # Determine if this line is a subtotal line (to avoid capturing it as 'total')
         _is_subtotal_line = any(lbl in upper for lbl in subtotal_labels)
 
-        # Total — only if not a subtotal line
         if total is None and not _is_subtotal_line and any(lbl in upper for lbl in total_labels):
             val = _extract_number_from_line(line)
             if val and val > 0:
                 total = val
 
-        # Subtotal
         if subtotal is None and _is_subtotal_line:
             val = _extract_number_from_line(line)
             if val and val > 0:
                 subtotal = val
 
-        # IVA / Tax
         if iva_amount is None and any(lbl in upper for lbl in tax_labels):
             val = _extract_number_from_line(line)
             if val is not None:
                 iva_amount = val
                 tax_total = val
 
-        # Discount
         if discount is None and any(lbl in upper for lbl in discount_labels):
             val = _extract_number_from_line(line)
             if val and val >= 0:
                 discount = val
 
-        # Tip
         if tip is None and any(lbl in upper for lbl in tip_labels):
             val = _extract_number_from_line(line)
             if val and val >= 0:
                 tip = val
 
-        # Withholdings
         for w_lbl in withholding_labels:
             if w_lbl in upper:
                 val = _extract_number_from_line(line)
@@ -453,7 +407,6 @@ def _find_financial_breakdown(lines: list, currency: str = 'COP') -> dict:
                     withholdings[w_lbl.lower()] = f'{val:.2f}'
                     withholdings_total += val
 
-    # Fallback for total: highest monetary amount in the last 20 lines
     if total is None:
         amounts = []
         for line in reversed(lines[-20:]):
@@ -496,9 +449,6 @@ def _find_document_type(text: str, lines: list, original_filename: str = '', has
 
 
 def _parse_products_and_line_items(lines: list, text: str, currency: str = 'COP') -> list:
-    """
-    Parses product line items: code/sku, description, quantity, unit price, tax, discount, item total.
-    """
     items = []
     table_started = False
     
@@ -521,7 +471,6 @@ def _parse_products_and_line_items(lines: list, text: str, currency: str = 'COP'
         if not table_started:
             continue
 
-        # Try to parse line item: [SKU]? [Quantity]? [Description] [Unit Price]? [Total]
         amounts = re.findall(r'\$?\s?([0-9]{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?|[0-9]+(?:[.,]\d{1,2})?)', stripped)
         dec_amounts = [_parse_decimal(a, default_currency=currency) for a in amounts]
         dec_amounts = [d for d in dec_amounts if d is not None and d > 0]
@@ -529,13 +478,11 @@ def _parse_products_and_line_items(lines: list, text: str, currency: str = 'COP'
         if not dec_amounts:
             continue
 
-        # Extract SKU / Code if line starts with code (e.g. 770..., PLU, ABC12)
         sku = ''
         sku_match = re.match(r'^([A-Za-z0-9\-]{3,15})\s+', stripped)
         if sku_match and not sku_match.group(1).isalpha():
             sku = sku_match.group(1)
 
-        # Extract Quantity if present at start
         qty = Decimal('1')
         qty_match = re.match(r'^(?:[A-Za-z0-9\-]{3,15}\s+)?(\d+(?:[.,]\d+)?)\s+', stripped)
         if qty_match:
@@ -546,11 +493,9 @@ def _parse_products_and_line_items(lines: list, text: str, currency: str = 'COP'
             except Exception:
                 pass
 
-        # Total amount and unit price
         item_total = dec_amounts[-1]
         unit_price = dec_amounts[-2] if len(dec_amounts) >= 2 else (item_total / qty if qty else item_total)
 
-        # Clean description
         desc = re.sub(r'[\$0-9.,]{3,}', '', stripped).strip()
         desc = re.sub(r'\s+', ' ', desc)
         if len(desc) < 2:
@@ -575,7 +520,6 @@ def _parse_products_and_line_items(lines: list, text: str, currency: str = 'COP'
 
 
 def _settled_charges(sections) -> Optional[Decimal]:
-    """Charges that a printed payment cancels out exactly (e.g. Seminario 185,000 / Bancolombia -185,000)."""
     from services.money import parse_decimal
 
     charges = Decimal('0')
@@ -607,7 +551,6 @@ def _guess_category_enhanced(supplier_name: Optional[str], lines: list, line_ite
     text = _normalize_text(' '.join(parts)).lower()
 
     def has_any(keywords) -> bool:
-        # Whole words only: 'ara' must not match 'para', nor 'bar' match 'barrio'.
         return any(re.search(rf'(?<!\w){re.escape(k)}(?!\w)', text) for k in keywords)
 
     if has_any([
@@ -743,7 +686,6 @@ class ProcessedDocument:
                 return {k: _convert(v) for k, v in obj.items()}
             return obj
         converted = _convert(data)
-        # Ensure warnings is always a list in JSON output
         if 'warnings' not in converted or not isinstance(converted['warnings'], list):
             converted['warnings'] = []
         return converted
@@ -788,13 +730,6 @@ class DocumentProcessor:
         processed: 'ProcessedDocument',
         structured: 'ExtractedDocument',
     ) -> 'ProcessedDocument':
-        """Overlay structured values onto an existing ProcessedDocument.
-
-        Used when a caller already has parser output. process_file does not
-        use this overlay: a successful Gemini extraction is the only source
-        of the business fields.
-        """
-        # Direct fields mapping: if structured has non-None, use it
         if structured.document_type:
             processed.document_type = structured.document_type
         if structured.supplier_name:
@@ -832,7 +767,6 @@ class DocumentProcessor:
             processed.subtotal_amount = structured.subtotal
         if structured.total_amount is not None:
             processed.total_amount = structured.total_amount
-        # Taxes breakdown
         if structured.taxes:
             from decimal import Decimal as _Dec
             tax_total = _Dec('0')
@@ -847,9 +781,6 @@ class DocumentProcessor:
                 processed.tax_amount = tax_total
             if iva_total is not None:
                 processed.iva_amount = iva_total
-        # line_items: a successful structured extraction replaces regex items,
-        # including the empty list (no product table). A failed extraction
-        # leaves the regex items in place.
         from services.extraction.post_validator import structured_extraction_failed
         if not structured_extraction_failed(structured):
             mapped = []
@@ -871,7 +802,6 @@ class DocumentProcessor:
                     'extra': {'source': 'gemini_structured'},
                 })
             processed.line_items = mapped
-        # Warnings propagation
         if structured.warnings:
             for w in structured.warnings:
                 if w not in processed.warnings:
@@ -879,7 +809,6 @@ class DocumentProcessor:
         if structured.requires_review:
             processed.requires_review = True
 
-        # Extra fields preserved in raw so consumers can inspect due_date/generation_date etc.
         extra_fields = {}
         for fname in ('generation_date', 'due_date', 'billing_period', 'suspension_date', 'document_kind'):
             v = getattr(structured, fname, None)
@@ -899,11 +828,6 @@ class DocumentProcessor:
         ocr_result: Optional[OCRResult],
         document_type_hint: str = 'receipt',
     ) -> ProcessedDocument:
-        """Map a validated ExtractedDocument onto ProcessedDocument.
-
-        Null means the value was not on the document. This path does not
-        fill those nulls with regex guesses.
-        """
         from decimal import Decimal as _Dec
 
         text = ocr_result.raw_text if ocr_result else ''
@@ -1045,7 +969,6 @@ class DocumentProcessor:
         if processed.total_amount == 0:
             settled = _settled_charges(processed.sections)
             if settled:
-                # "Valor a pagar 0" because a payment was already applied: the expense is the charge.
                 processed.total_amount = settled
                 processed.raw['settled_by_payment'] = True
                 processed.warnings.append(
@@ -1076,11 +999,6 @@ class DocumentProcessor:
 
     def process_file(self, file_path: str, document_type: str = 'receipt',
                      original_filename: str = '') -> ProcessedDocument:
-        """Extract business fields from Gemini structured output.
-
-        The regex parser runs only when structured extraction fails. It does
-        not fill nulls left by a successful Gemini response.
-        """
         from services.extraction.post_validator import structured_extraction_failed
 
         structured_doc = self._process_via_structured(file_path)
@@ -1156,22 +1074,18 @@ class DocumentProcessor:
             processed.review_reasons.append('No se pudo extraer texto legible del documento.')
             return processed
 
-        # 1. Colombian NIT & Verification Digit
         nit_base, dv, full_tax_id = _find_colombian_nit(text, lines)
         processed.supplier_tax_id = full_tax_id
         processed.supplier_nit = nit_base
         processed.supplier_verification_digit = dv
 
-        # 2. CUFE
         cufe = _find_cufe(text, lines)
         processed.cufe = cufe
 
-        # 3. Document Type & Invoice Number
         has_cufe = bool(cufe)
         processed.document_type = _find_document_type(text, lines, original_filename, has_cufe=has_cufe) or document_type_hint
         processed.document_number = _find_document_number(text, lines)
 
-        # 4. Supplier Info
         processed.supplier_name = _find_supplier_name(lines, text)
         processed.supplier_address = _find_supplier_address(lines)
         processed.supplier_phone = _find_supplier_phone(lines, text)
@@ -1184,17 +1098,14 @@ class DocumentProcessor:
         if url_matches:
             processed.supplier_website = url_matches[0]
 
-        # 5. Issue Date & Time
         issued_dt, issue_date_str, issue_time_str = _find_spanish_datetime(text, lines)
         processed.issued_at = issued_dt
         processed.issue_date = issue_date_str
         processed.issue_time = issue_time_str
 
-        # 6. Currency
         currency = _find_currency(text, lines, has_nit=bool(nit_base), has_cufe=bool(cufe))
         processed.currency = currency
 
-        # 7. Financial Breakdown (Subtotal, IVA, Discount, Tip, Withholdings, Total)
         fin = _find_financial_breakdown(lines, currency=currency)
         processed.subtotal_amount = fin['subtotal']
         processed.tax_amount = fin['tax_amount']
@@ -1205,20 +1116,16 @@ class DocumentProcessor:
         processed.withholdings_amount = fin['withholdings_total']
         processed.total_amount = fin['total']
 
-        # 8. Payment Method
         processed.payment_method = _find_payment_method(text, lines) or Document.PAYMENT_METHOD_OTHER
 
-        # 9. Line Items / Products
         processed.line_items = _parse_products_and_line_items(lines, text, currency=currency)
 
-        # 10. Category
         processed.category = _guess_category_enhanced(
             supplier_name=processed.supplier_name,
             lines=lines,
             line_items=processed.line_items,
         )
 
-        # Enrich / Fallback with Gemini Structured Data if available
         gemini_data = ocr_result.extra.get('gemini_structured') if isinstance(ocr_result.extra, dict) else None
         if gemini_data and isinstance(gemini_data, dict):
             if not processed.supplier_name and gemini_data.get('supplier_name'):
@@ -1314,7 +1221,6 @@ class DocumentProcessor:
                 processed.category = str(gemini_data['suggested_category']).strip()
 
 
-        # 11. Validation & Review Required evaluation
         if not processed.total_amount:
             processed.requires_review = True
             processed.review_reasons.append('No se identificó el monto total.')
@@ -1337,15 +1243,11 @@ class DocumentProcessor:
 
 
 def process_document_pipeline(document: Document) -> dict:
-    """
-    Executes full pipeline for document with duplicate detection and storage abstraction.
-    """
     if not document.file:
         raise ValueError('Document has no file attached.')
 
     user = document.user
 
-    # 1. Exact Duplicate Checksum Reuse
     if document.checksum:
         existing_completed = Document.objects.filter(
             user=user,
@@ -1379,7 +1281,6 @@ def process_document_pipeline(document: Document) -> dict:
                 document.notes = (document.notes or '') + f' [Duplicado de archivo del documento #{existing_completed.pk}]'
                 document.save()
 
-                # Recreate line items
                 items_data = []
                 for item in existing_completed.line_items.all():
                     items_data.append({
@@ -1399,7 +1300,6 @@ def process_document_pipeline(document: Document) -> dict:
                 if items_data:
                     document_service.set_line_items(document, items_data)
 
-            # Same file uploaded again: keep the data but ask the user instead of counting it twice.
             return {
                 'requires_review': True,
                 'review_reasons': [
@@ -1410,7 +1310,6 @@ def process_document_pipeline(document: Document) -> dict:
                 'processed_fields': document.structured_data,
             }
 
-    # 2. File Path Resolution with Storage Abstraction
     temp_file = None
     try:
         file_path = document.file.path
@@ -1441,7 +1340,6 @@ def process_document_pipeline(document: Document) -> dict:
             except Exception:
                 pass
 
-    # 3. Match / Create Supplier
     supplier = None
     if processed.supplier_name:
         try:
@@ -1460,11 +1358,9 @@ def process_document_pipeline(document: Document) -> dict:
                 tax_id=processed.supplier_tax_id or '',
             )
 
-    # 4. Category: learned from the supplier, else the AI suggestion, else "Other"
     from apps.expenses.automation import resolve_category
     category = resolve_category(user, supplier, processed.category)
 
-    # 5. Logical Duplicate Detection (Supplier + Document Number + Total, date when both have one)
     from apps.documents.duplicates import find_logical_duplicate
     logical_dup = find_logical_duplicate(
         document, supplier, processed.document_number, processed.total_amount, processed.issued_at,
@@ -1478,11 +1374,9 @@ def process_document_pipeline(document: Document) -> dict:
         )
         processed.raw['logical_duplicate_of_id'] = logical_dup.pk
 
-    # 6. Save Structured Data & Line Items
     model_fields = processed.to_model_fields()
     structured_source = processed.raw.get('extraction_source') == 'gemini_structured'
     if structured_source:
-        # Persist nulls from Gemini. Omitting the key would keep a previous guess.
         model_fields['document_number'] = processed.document_number or ''
         model_fields['issued_at'] = processed.issued_at
         model_fields['due_date'] = processed.due_date

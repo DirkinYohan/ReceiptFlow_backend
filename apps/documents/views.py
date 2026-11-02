@@ -39,8 +39,6 @@ from .services import document_service
 logger = logging.getLogger(__name__)
 
 
-
-
 def _is_stale(document) -> bool:
     from django.conf import settings
     from django.utils import timezone
@@ -66,7 +64,6 @@ def _missing_fields(document) -> list[str]:
     return [field for field, value in checks.items() if not value]
 
 def _after_user_edit(document, category_changed: bool) -> None:
-    """A human just reviewed this document: learn from it and keep its expense in sync."""
     if category_changed:
         learn_supplier_category(document.supplier, document.category)
     sync_expense_safely(document, user_confirmed=True)
@@ -99,7 +96,6 @@ class DocumentViewSet(viewsets.ModelViewSet):
             .select_related('supplier', 'category')
             .annotate(
                 line_items_count=count_of(ExpenseItem, 'document'),
-                # The linked expense in the same query (it used to cost 2 queries per row).
                 expense_pk=Subquery(
                     Expense.objects.filter(document=OuterRef('pk')).order_by('-incurred_at').values('pk')[:1]
                 ),
@@ -110,7 +106,6 @@ class DocumentViewSet(viewsets.ModelViewSet):
         return qs
 
     def _fresh(self, document):
-        """Re-read after a write so counts and the linked expense in the response are current."""
         return self.get_queryset().prefetch_related('line_items').get(pk=document.pk)
 
     def get_serializer_class(self):
@@ -162,7 +157,6 @@ class DocumentViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
-        # Enqueue background OCR task asynchronously
         try:
             from .tasks import process_document_task
             transaction.on_commit(lambda: process_document_task.delay(document_id=document.pk))

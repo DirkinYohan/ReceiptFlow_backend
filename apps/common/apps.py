@@ -4,11 +4,6 @@ from django.apps import AppConfig
 
 
 def _close_connection_pools():
-    """Stop the database pool's worker threads before the interpreter shuts down.
-
-    Otherwise a command that ends while the pool is still busy prints
-    "PythonFinalizationError: cannot join thread at interpreter shutdown".
-    """
     from django.db import connections
 
     for alias in connections:

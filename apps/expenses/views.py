@@ -31,7 +31,6 @@ from .serializers import (
 from .services import expense_service
 
 
-
 def _parse_day(value):
     return date.fromisoformat(value[:10]) if value else None
 
@@ -194,7 +193,6 @@ class ExpenseViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='export')
     def export(self, request):
-        # "file_format", not "format": DRF reserves ?format= for renderer negotiation.
         file_format = (request.query_params.get('file_format') or 'xlsx').lower()
         if file_format not in ('xlsx', 'csv'):
             return Response(

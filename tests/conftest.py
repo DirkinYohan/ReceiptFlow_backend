@@ -2,7 +2,6 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 
-# Python 3.14 compatibility for Django template context copying during tests
 try:
     from django.template import context as django_template_context
     def _safe_base_context_copy(self):

@@ -1,4 +1,3 @@
-"""Reading a document again from the review inbox, and embedding its file."""
 from datetime import timedelta
 from decimal import Decimal
 from unittest.mock import patch

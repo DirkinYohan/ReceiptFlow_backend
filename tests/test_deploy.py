@@ -1,4 +1,3 @@
-"""Pieces needed to run on Render's free plan."""
 from unittest.mock import patch
 
 from django.test import override_settings

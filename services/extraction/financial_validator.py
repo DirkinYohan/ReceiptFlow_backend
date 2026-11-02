@@ -1,4 +1,3 @@
-"""Reconcile printed amounts. Does not replace a printed total to force a match."""
 from __future__ import annotations
 
 from decimal import Decimal
@@ -6,7 +5,7 @@ from typing import List, Optional, Sequence, Tuple
 
 from services.extraction.schemas import ExtractedDocument, LineItem, TaxItem
 
-Warning = Tuple[str, Optional[str], bool]  # code, message, critical
+Warning = Tuple[str, Optional[str], bool]
 
 
 def _rate_percent(rate: Decimal) -> Decimal:
@@ -24,10 +23,6 @@ def neutralize_implausible_line_totals(
     subtotal: Optional[Decimal],
     tolerance: Decimal,
 ) -> Tuple[List[LineItem], List[Warning]]:
-    """Drop a line total that is only qty × price when that product exceeds the subtotal.
-
-    The printed price stays. The fabricated extension does not.
-    """
     warnings: List[Warning] = []
     updated: List[LineItem] = []
     for index, item in enumerate(items, start=1):
@@ -84,7 +79,6 @@ def identify_taxable_base(
     discounts: Decimal,
     tolerance: Decimal,
 ) -> Optional[Decimal]:
-    """Find the printed base for one tax. Never defaults to the full subtotal."""
     if tax.taxable_base is not None:
         return tax.taxable_base
     if tax.rate is None or tax.amount is None:
@@ -189,8 +183,8 @@ def document_total_warnings(doc: ExtractedDocument, items: Sequence[LineItem], t
             warnings.append((
                 'UTILITY_PARTIAL_TOTAL',
                 (
-                    f"subtotal de componentes {doc.subtotal} no es el total a pagar {doc.total_amount}; "
-                    "una factura de servicio puede incluir aseo, terceros u otros cargos fuera de ese subtotal"
+                    f"component subtotal {doc.subtotal} is not the amount due {doc.total_amount}; "
+                    "a utility bill may include sanitation, third-party or other charges outside that subtotal"
                 ),
                 False,
             ))

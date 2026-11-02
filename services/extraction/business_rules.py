@@ -1,8 +1,3 @@
-"""Decide document outcome from validation warnings.
-
-Review is reserved for contradictions and missing critical facts.
-Informational warnings leave the document completed.
-"""
 from __future__ import annotations
 
 from typing import Iterable, Tuple
@@ -51,7 +46,6 @@ def decide_validation(
     missing_total: bool = False,
     missing_supplier: bool = False,
 ) -> Tuple[str, bool]:
-    """Return (validation_level, requires_review)."""
     stored = list(warnings)
     if any(is_failed(item) for item in stored):
         return FAILED, True

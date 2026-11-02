@@ -1,8 +1,3 @@
-"""
-Unit tests for Celery background tasks (Step 11.1).
-All external services (OCR/Google Vision, Redis) are mocked.
-Tests run in CELERY_TASK_ALWAYS_EAGER=True mode via config/settings/test.py.
-"""
 from __future__ import annotations
 
 import tempfile
@@ -33,10 +28,6 @@ from apps.documents.tasks import (
 User = get_user_model()
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
 @pytest.fixture
 def user(db):
     return User.objects.create_user(
@@ -48,7 +39,6 @@ def user(db):
 
 @pytest.fixture
 def pending_document(db, user, tmp_path):
-    """Document in PENDING state with a real (empty) file reference."""
     fake_file = tmp_path / 'receipt.png'
     fake_file.write_bytes(b'\x89PNG\r\n\x1a\n' + b'\x00' * 100)
     doc = Document.objects.create(
@@ -64,15 +54,10 @@ def pending_document(db, user, tmp_path):
 
 @pytest.fixture(autouse=True)
 def clear_cache():
-    """Ensure Redis/LocMem cache is clean between tests."""
     cache.clear()
     yield
     cache.clear()
 
-
-# ---------------------------------------------------------------------------
-# 11.1.A — Redis lock helpers
-# ---------------------------------------------------------------------------
 
 class TestProcessingLock:
     def test_acquire_lock_succeeds_first_time(self):
@@ -100,10 +85,6 @@ class TestProcessingLock:
         assert _is_duplicate_task(doc_id) is False
 
 
-# ---------------------------------------------------------------------------
-# 11.1.B — process_document_task: invalid / not-found document
-# ---------------------------------------------------------------------------
-
 @pytest.mark.django_db
 class TestProcessDocumentTaskGuards:
     def test_invalid_id_returns_early(self):
@@ -130,17 +111,12 @@ class TestProcessDocumentTaskGuards:
         assert result['reason'] == 'already_completed'
 
     def test_duplicate_task_blocked_by_lock(self, pending_document):
-        # Pre-acquire the lock to simulate a running worker
         _acquire_processing_lock(pending_document.pk)
         result = process_document_task.apply(args=[pending_document.pk]).get()
         assert result['ok'] is True
         assert result.get('skipped') is True
         assert result['reason'] == 'duplicate_lock'
 
-
-# ---------------------------------------------------------------------------
-# 11.1.C — process_document_task: state transitions
-# ---------------------------------------------------------------------------
 
 @pytest.mark.django_db
 class TestProcessDocumentTaskStateTransitions:
@@ -193,7 +169,6 @@ class TestProcessDocumentTaskStateTransitions:
             return_value=self._make_mock_pipeline_result(requires_review=False),
         ):
             process_document_task.apply(args=[pending_document.pk]).get()
-        # Lock should be released, so re-acquisition must succeed
         assert _acquire_processing_lock(pending_document.pk) is True
 
     def test_lock_released_after_failure(self, pending_document):
@@ -221,10 +196,6 @@ class TestProcessDocumentTaskStateTransitions:
         assert Document.STATUS_PROCESSING in statuses_seen
 
 
-# ---------------------------------------------------------------------------
-# 11.1.D — Maintenance tasks
-# ---------------------------------------------------------------------------
-
 @pytest.mark.django_db
 class TestMarkStuckProcessingDocuments:
     def test_marks_stuck_document_as_failed(self, user):
@@ -234,7 +205,6 @@ class TestMarkStuckProcessingDocuments:
             original_filename='stuck.png',
             file='fake/stuck.png',
             status=Document.STATUS_PROCESSING,
-            # Simulate started 2 hours ago
             processing_started_at=timezone.now() - timedelta(hours=2),
         )
         with patch('apps.documents.tasks.settings') as mock_settings:
@@ -307,7 +277,6 @@ class TestCleanupOldFailedDocuments:
 class TestCleanupTokenBlacklist:
     def test_runs_without_error(self):
         result = cleanup_old_token_blacklist.apply(args=[30]).get()
-        # Either successfully deleted or caught the expected error
         assert 'error' not in result or result.get('error') is True
 
 
@@ -332,16 +301,15 @@ class TestCleanupOrphanMediaFiles:
         docs_dir.mkdir(parents=True)
         orphan = docs_dir / 'orphan_old_file.png'
         orphan.write_bytes(b'fake content')
-        # Make the file appear old (more than 24 hours)
         old_mtime = time.time() - (25 * 3600)
         import os
         os.utime(orphan, (old_mtime, old_mtime))
 
         with patch('apps.documents.tasks.settings') as mock_settings:
             mock_settings.MEDIA_ROOT = str(media_root)
-            result = cleanup_orphan_media_files.apply(args=[True, 24]).get()  # dry_run=True
+            result = cleanup_orphan_media_files.apply(args=[True, 24]).get()
 
-        assert orphan.exists()  # File must NOT be deleted in dry run
+        assert orphan.exists()
         assert result['dry_run'] is True
         assert result['orphaned_removed'] >= 1
 
@@ -354,7 +322,6 @@ class TestCleanupTemporaryFiles:
         import os
         os.utime(old_file, (old_mtime, old_mtime))
 
-        # Patch the tempfile module as it is used inside the task function (local import)
         import tempfile as _tempfile
         with patch.object(_tempfile, 'gettempdir', return_value=str(tmp_path)):
             result = cleanup_temporary_processing_files.apply(args=[12]).get()
@@ -365,7 +332,6 @@ class TestCleanupTemporaryFiles:
     def test_keeps_recent_temp_files(self, tmp_path):
         new_file = tmp_path / 'receiptflow_recent.tmp'
         new_file.write_bytes(b'temp data')
-        # Do not change mtime — it will be fresh
 
         import tempfile as _tempfile
         with patch.object(_tempfile, 'gettempdir', return_value=str(tmp_path)):

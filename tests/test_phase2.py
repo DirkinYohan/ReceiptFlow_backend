@@ -1,4 +1,3 @@
-"""Review inbox, recurring expense detection and payables/reminders."""
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 

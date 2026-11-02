@@ -1,4 +1,3 @@
-"""List endpoints must not run one extra query per row (N+1)."""
 from decimal import Decimal
 
 import pytest

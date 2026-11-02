@@ -18,7 +18,6 @@ SECRET_KEY = env('DJANGO_SECRET_KEY')
 DEBUG = env('DJANGO_DEBUG')
 ALLOWED_HOSTS = env.list('DJANGO_ALLOWED_HOSTS', default=['localhost', '127.0.0.1'])
 FRONTEND_URL = env('APP_FRONTEND_URL', default='http://localhost:3000')
-# Shared secret for the external scheduler (see apps/common/scheduled.py). Empty = endpoint disabled.
 CRON_SECRET = env('CRON_SECRET', default='')
 
 DJANGO_APPS = [
@@ -56,11 +55,9 @@ INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
-    # Outermost of the API's own: translates its Spanish messages when the client asks for English.
     'apps.common.i18n.ApiLanguageMiddleware',
     'apps.common.middleware.PrivateApiCacheMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
-    # Picks the language from Accept-Language, so Django/DRF messages follow the app's language.
     'django.middleware.locale.LocaleMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -104,9 +101,6 @@ DATABASES = {
         },
     }
 }
-# The database is remote (Supabase): opening a TLS connection costs ~0.7 s per request.
-# A shared pool reuses connections across requests and threads (runserver included).
-# DB_POOL=False turns it off, e.g. behind Supabase's transaction pooler (port 6543).
 if env.bool('DB_POOL', default=True):
     DATABASES['default']['OPTIONS']['pool'] = {
         'min_size': env.int('DB_POOL_MIN_SIZE', default=4),
@@ -238,11 +232,9 @@ GOOGLE_CLOUD_PROJECT_ID = env('GOOGLE_CLOUD_PROJECT_ID', default='')
 GOOGLE_APPLICATION_CREDENTIALS = env('GOOGLE_APPLICATION_CREDENTIALS', default='')
 GOOGLE_VISION_TIMEOUT = env.int('GOOGLE_VISION_TIMEOUT', default=60)
 
-# Google Gemini & OCR Service
 GEMINI_API_KEY = env('GEMINI_API_KEY', default='')
 GEMINI_MODEL = env('GEMINI_MODEL', default='gemini-3.5-flash')
 OCR_SERVICE = env('OCR_SERVICE', default='gemini' if GEMINI_API_KEY else 'google_vision')
-
 
 
 LOGGING = {
@@ -297,11 +289,6 @@ LOGGING = {
     },
 }
 
-# ------------------------------------------------------------------------------
-# Cache / Redis
-# ------------------------------------------------------------------------------
-# Redis is optional: Render's free plan has no worker for Celery, so without REDIS_URL
-# the app keeps its cache in memory and reads documents inside the upload request.
 REDIS_URL = env('REDIS_URL', default='')
 if REDIS_URL:
     CACHES = {
@@ -332,11 +319,7 @@ else:
     }
 SESSION_ENGINE = 'django.contrib.sessions.backends.cached_db'
 
-# ------------------------------------------------------------------------------
-# Celery
-# ------------------------------------------------------------------------------
 CELERY_BROKER_URL = env('CELERY_BROKER_URL', default=REDIS_URL or 'memory://')
-# No broker -> run tasks inline (the document is read during the upload request).
 CELERY_TASK_ALWAYS_EAGER = env.bool('CELERY_TASK_ALWAYS_EAGER', default=not REDIS_URL)
 CELERY_TASK_EAGER_PROPAGATES = CELERY_TASK_ALWAYS_EAGER
 CELERY_RESULT_BACKEND = env('CELERY_RESULT_BACKEND', default='django-db')
@@ -348,9 +331,6 @@ CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = TIME_ZONE
 
-# ------------------------------------------------------------------------------
-# Gemini Structured Output Extraction
-# ------------------------------------------------------------------------------
 GEMINI_STRUCTURED_OUTPUT_ENABLED = env.bool('GEMINI_STRUCTURED_OUTPUT_ENABLED', default=True)
 GEMINI_USE_OCR_FALLBACK = env.bool('GEMINI_USE_OCR_FALLBACK', default=True)
 GEMINI_DEFAULT_OCR_SERVICE = env('OCR_SERVICE', default='gemini')
@@ -366,9 +346,6 @@ PROCESSING_TIMEOUT_MINUTES = env.int('PROCESSING_TIMEOUT_MINUTES', default=15)
 PROCESSING_MAX_ATTEMPTS = env.int('PROCESSING_MAX_ATTEMPTS', default=3)
 CELERY_BEAT_ENABLED = env.bool('CELERY_BEAT_ENABLED', default=True)
 
-# ------------------------------------------------------------------------------
-# Rate Limiting (django-ratelimit)
-# ------------------------------------------------------------------------------
 RATELIMIT_ENABLE = env.bool('RATELIMIT_ENABLE', default=True)
 RATELIMIT_USE_CACHE = 'default'
 RATELIMIT_VIEW = 'apps.common.responses.rate_limited_view'
@@ -379,28 +356,25 @@ RATELIMIT_AUTH_VERIFY_EMAIL = env('RATELIMIT_AUTH_VERIFY_EMAIL', default='10/m')
 RATELIMIT_DOCUMENTS_CREATE = env('RATELIMIT_DOCUMENTS_CREATE', default='20/m')
 RATELIMIT_DOCUMENTS_PROCESS = env('RATELIMIT_DOCUMENTS_PROCESS', default='15/m')
 
-# ------------------------------------------------------------------------------
-# drf-spectacular - OpenAPI / Swagger
-# ------------------------------------------------------------------------------
 SPECTACULAR_SETTINGS = {
     'TITLE': 'ReceiptFlow API',
     'DESCRIPTION': (
-        'API REST para ReceiptFlow: carga y procesamiento de recibos y facturas '
-        'mediante OCR con Google Cloud Vision. Incluye autenticación JWT, gestión '
-        'de gastos, categorías, proveedores y reportes de dashboard.'
+        'REST API for ReceiptFlow: upload and processing of receipts and invoices '
+        'with OCR and Gemini extraction. Includes JWT authentication, management '
+        'of expenses, categories, suppliers and dashboard reports.'
     ),
     'VERSION': '1.0.0',
     'SERVE_INCLUDE_SCHEMA': False,
     'SCHEMA_PATH_PREFIX': '/api/',
     'SCHEMA_COERCE_PATH_PK_SUFFIX': True,
     'TAGS': [
-        {'name': 'Authentication', 'description': 'Registro, inicio de sesión, JWT, contraseñas y verificación de correo.'},
-        {'name': 'Users', 'description': 'Gestión de perfil de usuario y administración.'},
-        {'name': 'Documents', 'description': 'Subida, procesamiento OCR, actualización y eliminación de documentos.'},
-        {'name': 'Expenses', 'description': 'Gestión de gastos, items, filtros y estadísticas.'},
-        {'name': 'Categories', 'description': 'Categorías de gasto (sistema y personalizadas).'},
-        {'name': 'Suppliers', 'description': 'Proveedores con deduplicación inteligente y favoritos.'},
-        {'name': 'Reports', 'description': 'Reportes agregados y endpoints de dashboard.'},
+        {'name': 'Authentication', 'description': 'Registration, login, JWT, passwords and email verification.'},
+        {'name': 'Users', 'description': 'User profile management and administration.'},
+        {'name': 'Documents', 'description': 'Document upload, OCR processing, update and deletion.'},
+        {'name': 'Expenses', 'description': 'Expenses, items, filters and statistics.'},
+        {'name': 'Categories', 'description': 'Expense categories (system and custom).'},
+        {'name': 'Suppliers', 'description': 'Suppliers with smart deduplication and favorites.'},
+        {'name': 'Reports', 'description': 'Aggregated reports and dashboard endpoints.'},
     ],
     'SWAGGER_UI_SETTINGS': {
         'deepLinking': True,
@@ -431,9 +405,6 @@ SPECTACULAR_SETTINGS = {
     },
 }
 
-# ------------------------------------------------------------------------------
-# Storage backend abstraction (local filesystem vs Google Cloud Storage)
-# ------------------------------------------------------------------------------
 STORAGE_BACKEND = env('STORAGE_BACKEND', default='filesystem').lower()
 if STORAGE_BACKEND == 'gcs':
     STORAGES = {
@@ -454,8 +425,6 @@ if STORAGE_BACKEND == 'gcs':
         },
     }
 elif STORAGE_BACKEND == 's3':
-    # Any S3-compatible bucket; on Render we use Supabase Storage, because the server's
-    # own disk is wiped every time a free instance sleeps or redeploys.
     STORAGES = {
         'default': {
             'BACKEND': 'storages.backends.s3.S3Storage',
@@ -467,7 +436,6 @@ elif STORAGE_BACKEND == 's3':
                 'secret_key': env('S3_SECRET_ACCESS_KEY', default=''),
                 'addressing_style': 'path',
                 'signature_version': 's3v4',
-                # Receipts are private: links are signed and expire.
                 'default_acl': None,
                 'querystring_auth': True,
                 'querystring_expire': 60 * 60,
@@ -488,9 +456,6 @@ else:
         },
     }
 
-# ------------------------------------------------------------------------------
-# Security & Maintenance
-# ------------------------------------------------------------------------------
 SECURE_CONTENT_TYPE_NOSNIFF = True
 SECURE_BROWSER_XSS_FILTER = True
 X_FRAME_OPTIONS = 'DENY'
@@ -510,10 +475,8 @@ MAINTENANCE_ORPHAN_FILES_DAYS = env.int('MAINTENANCE_ORPHAN_FILES_DAYS', default
 MAINTENANCE_FAILED_DOCS_DAYS = env.int('MAINTENANCE_FAILED_DOCS_DAYS', default=30)
 MAINTENANCE_TOKEN_BLACKLIST_DAYS = env.int('MAINTENANCE_TOKEN_BLACKLIST_DAYS', default=30)
 
-# Extra MIME type strict verification (python-magic)
 STRICT_MIME_VERIFICATION = True
 
-# Temporary file upload permission (prevents path traversal via name)
 FILE_UPLOAD_PERMISSIONS = 0o640
 FILE_UPLOAD_DIRECTORY_PERMISSIONS = 0o750
 FILE_UPLOAD_TEMP_DIR = None

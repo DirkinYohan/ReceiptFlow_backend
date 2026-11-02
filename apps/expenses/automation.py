@@ -1,4 +1,3 @@
-"""Automatic bookkeeping: category resolution, supplier learning and document -> expense sync."""
 from __future__ import annotations
 
 import logging
@@ -28,14 +27,12 @@ def _active_categories_for(user):
 
 
 def resolve_category(user, supplier=None, suggested_name: Optional[str] = None) -> Optional[Category]:
-    """Pick a category: what the user taught us for this supplier, then the AI guess, then 'Other'."""
     learned = getattr(supplier, 'default_category', None) if supplier else None
     if learned and learned.is_active:
         return learned
     categories = _active_categories_for(user)
     if suggested_name:
         name = suggested_name.strip()
-        # User categories win over system ones with the same name.
         match = (
             categories.filter(scope=Category.SCOPE_USER, name__iexact=name).first()
             or categories.filter(scope=Category.SCOPE_SYSTEM, name__iexact=name).first()
@@ -52,7 +49,6 @@ def resolve_category(user, supplier=None, suggested_name: Optional[str] = None) 
 
 
 def learn_supplier_category(supplier, category) -> bool:
-    """Remember the category the user chose so future documents from this supplier reuse it."""
     if supplier is None or category is None or supplier.default_category_id == category.pk:
         return False
     supplier.default_category = category
@@ -61,7 +57,6 @@ def learn_supplier_category(supplier, category) -> bool:
 
 
 def _user_title(document: Document) -> str:
-    """The title, unless it is just the uploaded file name (e.g. 'WhatsApp Image 2026-10-05')."""
     title = (document.title or '').strip()
     filename = document.original_filename or ''
     if not title or title in (filename, os.path.splitext(filename)[0]):
@@ -81,7 +76,6 @@ def _expense_values(document: Document) -> dict:
     tax = document.tax_amount or Decimal('0')
     discount = document.discount_amount or Decimal('0')
     tip = document.tip_amount or Decimal('0')
-    # Expense.total_amount = amount + tax - discount + tip, so this keeps it equal to the printed total.
     amount = max(total - tax + discount - tip, Decimal('0'))
     supplier = document.supplier
     description = (_user_title(document) or _auto_description(document))[:300]
@@ -109,10 +103,8 @@ def _guess_from_ocr(document: Document) -> Optional[str]:
 
 
 def sync_expense_from_document(document: Document, user_confirmed: bool = False) -> Optional[Expense]:
-    """Create (or refresh) the expense of a completed document. Returns None when it isn't ready."""
     if document.status != Document.STATUS_COMPLETED or not document.total_amount:
         return None
-    # A re-uploaded file only counts when the user approved it on purpose.
     if not user_confirmed and (document.structured_data or {}).get('is_exact_file_duplicate'):
         return None
     if document.category is None:

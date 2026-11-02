@@ -1,4 +1,3 @@
-"""Bills to pay: infer payment state from the document and bucket unpaid ones by due date."""
 from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta
@@ -30,10 +29,8 @@ def _aware(day: date) -> datetime:
 
 
 def apply_payment_inference(document: Document, document_class: Optional[str], extra_fields: dict) -> None:
-    """Fill is_paid / due_date from what the document says. Never marks a paid document as unpaid."""
     is_bill = (document_class or '') in BILL_CLASSES
     if not document.due_date and is_bill:
-        # Utility bills print "pago oportuno" instead of a due date.
         payment_day = _parse_iso_date(extra_fields.get('payment_date'))
         if payment_day:
             document.due_date = _aware(payment_day)

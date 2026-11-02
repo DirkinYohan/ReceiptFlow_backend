@@ -1,4 +1,3 @@
-"""Automatic expense registration and supplier category learning."""
 from decimal import Decimal
 from unittest.mock import patch
 

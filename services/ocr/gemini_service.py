@@ -119,7 +119,6 @@ class GeminiOCRService(BaseOCRService):
 
         file_part = types.Part.from_bytes(data=file_bytes, mime_type=mime_type)
 
-        # Build list of models to try in order (configured model first, then fallbacks)
         models_to_try = [self._default_model]
         for m in CANDIDATE_MODELS:
             if m not in models_to_try:
@@ -148,7 +147,6 @@ class GeminiOCRService(BaseOCRService):
         if not response_text:
             raise RuntimeError(f'All Gemini OCR models failed. Last error: {last_error}')
 
-        # Parse structured JSON if possible
         parsed = {}
         cleaned = _clean_json_text(response_text)
         try:

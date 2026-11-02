@@ -1,9 +1,3 @@
-"""Scheduled maintenance without a Celery worker (Render's free plan has none).
-
-An external scheduler (e.g. cron-job.org, free) calls POST /api/internal/run-scheduled-tasks/
-once a day with the header X-Cron-Secret. The same work is available as
-`python manage.py run_scheduled_tasks` for a Render Cron Job or a local run.
-"""
 import hmac
 import logging
 
@@ -29,8 +23,8 @@ def run_scheduled_tasks() -> dict:
         ('token_blacklist', cleanup_old_token_blacklist),
     ):
         try:
-            results[name] = task()  # direct call: runs now, in this process
-        except Exception:  # one failing task must not stop the others
+            results[name] = task()
+        except Exception:
             logger.exception('Scheduled task %s failed', name)
             results[name] = 'error'
     return results
@@ -41,7 +35,6 @@ def run_scheduled_tasks() -> dict:
 def scheduled_tasks_view(request):
     expected = getattr(settings, 'CRON_SECRET', '')
     received = request.headers.get('X-Cron-Secret', '')
-    # 404 (not 403) so the endpoint does not reveal itself without the right secret.
     if not expected or not hmac.compare_digest(received.encode(), expected.encode()):
         return JsonResponse({'detail': 'Not found.'}, status=404)
     return JsonResponse({'status': 'ok', 'results': run_scheduled_tasks()})
@@ -49,5 +42,4 @@ def scheduled_tasks_view(request):
 
 @require_GET
 def health_view(request):
-    """Liveness check for Render: answers without touching the database."""
     return JsonResponse({'status': 'ok'})

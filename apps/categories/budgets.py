@@ -1,4 +1,3 @@
-"""Monthly budgets per category: how much is spent and when to warn."""
 from __future__ import annotations
 
 import logging
@@ -71,7 +70,6 @@ def budget_status(budget: CategoryBudget, day: Optional[date] = None) -> dict:
 
 
 def check_budget_alert(user, category, day: Optional[date] = None) -> Optional[str]:
-    """Email the user the first time this month a budget passes 80% and again when it passes 100%."""
     if category is None:
         return None
     budget = CategoryBudget.objects.filter(user=user, category=category).select_related('category').first()
@@ -94,7 +92,6 @@ def check_budget_alert(user, category, day: Optional[date] = None) -> Optional[s
 
 
 def check_budget_alert_safely(expense) -> Optional[str]:
-    # Old receipts uploaded today must not trigger alerts for months that are already closed.
     if month_start(timezone.localdate(expense.incurred_at)) != month_start():
         return None
     try:

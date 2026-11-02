@@ -9,8 +9,8 @@ from apps.suppliers.models import Supplier
 
 class Command(BaseCommand):
     help = (
-        'Pone al día los documentos ya procesados: estado de pago y vencimiento, '
-        'gasto asociado y detección de gastos recurrentes.'
+        'Brings processed documents up to date: payment status and due date, '
+        'linked expense and recurring-expense detection.'
     )
 
     def handle(self, *args, **options):
@@ -36,6 +36,6 @@ class Command(BaseCommand):
         recurring = sum(1 for supplier in suppliers if refresh_supplier_recurrence(supplier.user, supplier))
 
         self.stdout.write(self.style.SUCCESS(
-            f'Pagos/vencimientos actualizados: {updated}. Gastos creados: {created}. '
-            f'Proveedores recurrentes: {recurring}.'
+            f'Payments/due dates updated: {updated}. Expenses created: {created}. '
+            f'Recurring suppliers: {recurring}.'
         ))

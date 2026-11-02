@@ -1,4 +1,3 @@
-"""Parseo de montos compartido por OCR y extracción estructurada."""
 from __future__ import annotations
 
 import re
@@ -7,12 +6,6 @@ from typing import Optional
 
 
 def parse_decimal(value: Optional[str], default_currency: str = 'COP') -> Optional[Decimal]:
-    """
-    Parses a string into a Decimal with support for Colombian & Latin formats:
-    - Period as thousands separator: 125.000 -> 125000.00
-    - Period thousands and comma decimal: 1.250.000,50 -> 1250000.50
-    - Comma thousands and dot decimal: 1,250,000.50 -> 1250000.50
-    """
     if value is None:
         return None
     raw = str(value).strip()
@@ -30,21 +23,15 @@ def parse_decimal(value: Optional[str], default_currency: str = 'COP') -> Option
 
     if num_dots > 0 and num_commas > 0:
         if cleaned.rfind(',') > cleaned.rfind('.'):
-            # European / Latin format: 1.250.000,50 -> 1250000.50
             cleaned = cleaned.replace('.', '').replace(',', '.')
         else:
-            # US format: 1,250,000.50 -> 1250000.50
             cleaned = cleaned.replace(',', '')
     elif num_dots > 1 and num_commas == 0:
-        # Multiple dots as thousands: 1.250.000 -> 1250000
         cleaned = cleaned.replace('.', '')
     elif num_commas > 1 and num_dots == 0:
-        # Multiple commas as thousands: 1,250,000 -> 1250000
         cleaned = cleaned.replace(',', '')
     elif num_dots == 1 and num_commas == 0:
         parts = cleaned.split('.')
-        # If exactly 3 digits after dot, e.g. 125.000 or 45.000:
-        # In Colombia (COP) this is always a thousands separator
         if len(parts[1]) == 3 and (default_currency == 'COP' or len(parts[0]) >= 1):
             cleaned = parts[0] + parts[1]
         elif len(parts[1]) in (1, 2):

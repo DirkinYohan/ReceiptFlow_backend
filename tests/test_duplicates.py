@@ -1,4 +1,3 @@
-"""Detecting invoices the user already uploaded."""
 from datetime import timedelta
 from decimal import Decimal
 

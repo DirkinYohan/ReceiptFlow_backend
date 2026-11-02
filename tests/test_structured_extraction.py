@@ -1,7 +1,3 @@
-"""Unit tests for the Gemini Structured Output extraction + post-validation layer.
-
-All tests mock external Gemini calls; no real file I/O or API calls.
-"""
 from __future__ import annotations
 
 from decimal import Decimal
@@ -21,10 +17,6 @@ from services.extraction.post_validator import (
     _looks_like_date,
 )
 
-
-# ---------------------------------------------------------------------------
-# 1. Schema tests (TR-1.x)
-# ---------------------------------------------------------------------------
 
 class TestSchemas:
     def test_null_invoice_and_empty_items(self):
@@ -73,10 +65,6 @@ class TestSchemas:
         assert item.total == Decimal('3000.00')
 
 
-# ---------------------------------------------------------------------------
-# 2. Post-validator tests (TR-3.x)
-# ---------------------------------------------------------------------------
-
 def _perfect_doc(**overrides):
     base = ExtractedDocument(
         document_type='invoice',
@@ -105,7 +93,6 @@ def _perfect_doc(**overrides):
         ],
     )
     if overrides:
-        # model_copy update override
         return base.model_copy(update=overrides)
     return base
 
@@ -124,11 +111,10 @@ class TestPostValidation:
         assert doc.requires_review is False
 
     def test_math_inconsistency_warns_no_mutate(self, snapshot=None):
-        # Intencionalmente descuadramos el total
         subtotal = Decimal('1000000')
         desc = Decimal('100000')
         iva = Decimal('171000')
-        total_bad = Decimal('1089000')  # Debería ser 1.071.000 -> 18k diff
+        total_bad = Decimal('1089000')
         doc = ExtractedDocument(
             document_type='invoice',
             supplier_name="D&W Construcción y Diseño S.A.S",
@@ -155,11 +141,9 @@ class TestPostValidation:
         )
         raw_hint = 'CANT DESCRIPCION V. UNIT DESCUENTO TOTAL'
         validated = validate_extracted(doc, raw_text_hint=raw_hint)
-        # No debe mutar valores
         assert validated.subtotal == subtotal
         assert validated.total_amount == total_bad
         assert validated.taxes[0].amount == iva
-        # Debe contener warnings
         codes = ' '.join(validated.warnings)
         assert 'TOTAL_MISMATCH' in codes or 'LINE_TOTALS_SUM_MISMATCH' in codes
         assert validated.requires_review is True
@@ -203,7 +187,6 @@ class TestPostValidation:
         assert 'FAUX_LINE_ITEMS_DETECTED' in codes
         assert 'FAUX_LINE_ITEMS_STRIPPED' in codes
         assert v.line_items == []
-        # Valores no mutados
         assert v.subtotal == Decimal('95000.00')
         assert v.total_amount == Decimal('125000.00')
 
@@ -224,10 +207,6 @@ class TestPostValidation:
         assert not _looks_like_date('')
 
 
-# ---------------------------------------------------------------------------
-# 3. GeminiExtractor mocks (TR-2.x)
-# ---------------------------------------------------------------------------
-
 class _FakeResponse:
     def __init__(self, text):
         self.text = text
@@ -235,8 +214,6 @@ class _FakeResponse:
 
 class TestGeminiExtractorStrictSchema:
     def test_omitted_fields_are_null(self):
-        """Los campos no presentes en la respuesta del extractor se conservan null
-        (no aplica fallback heurístico)."""
         payload = ExtractedDocument(
             document_type='receipt',
             supplier_name='Comercio Local',
@@ -244,13 +221,10 @@ class TestGeminiExtractorStrictSchema:
             currency='COP',
             total_amount=Decimal('50000.00'),
         )
-        # Caso 1: validate_extracted sobre datos con invoice=null lo mantiene null
         v = validate_extracted(payload)
         assert v.invoice_number is None
         assert v.supplier_name == 'Comercio Local'
 
-        # Caso 2: Con validate_extracted + raw_text sin tabla no rellena line_items.
-        # Si invocamos un mock extractor que devuelve invoice=None el resultado debe seguir None
         fake_result = payload
         with patch.object(GeminiStructuredExtractor, 'extract_file',
                           return_value=fake_result):
@@ -260,8 +234,6 @@ class TestGeminiExtractorStrictSchema:
             assert out.supplier_name == 'Comercio Local'
 
     def test_api_down_requires_review_no_fallback(self):
-        """Si la API falla por completo, extract_file retorna requires_review=True
-        y un código STRUCTURED_OUTPUT_FAILED sin inventar datos."""
         fake_fallback = ExtractedDocument(
             requires_review=True,
             warnings=['STRUCTURED_OUTPUT_FAILED: simulated down'],
@@ -278,17 +250,11 @@ class TestGeminiExtractorStrictSchema:
         assert out.total_amount is None
 
 
-# ---------------------------------------------------------------------------
-# 4. Fixtures tipificadas + Processor integration (TR-6.x)
-# ---------------------------------------------------------------------------
-
 def _make_doc(d: dict):
-    """Helper para construir un ExtractedDocument desde dict."""
     return ExtractedDocument.model_validate(d)
 
 
 class TestFacturasTipificadas:
-    # ---- PROMWEBSOFT: factura electrónica, tabla con 3 productos, FESE ----
     def test_promwebsoft(self):
         cufe = 'a' * 96
         doc = ExtractedDocument(
@@ -326,21 +292,18 @@ class TestFacturasTipificadas:
         raw = ('CANT DESCRIPCIÓN VLR UNITARIO IVA TOTAL\n'
                'FESE Factura Electrónica SECOP')
         v = validate_extracted(doc, raw_text_hint=raw)
-        assert v.model_dump().get('document_type') or doc.document_type  # Acceso seguro
+        assert v.model_dump().get('document_type') or doc.document_type
         assert doc.invoice_number == 'FESE-001-000042'
         assert doc.supplier_tax_id == '900200300'
         assert doc.supplier_tax_id_verification_digit == '9'
         assert len(doc.line_items) == 3
-        # Verificar que no existan productos prohibidos
         for it in doc.line_items:
             d = (it.description or '').lower()
             for bad in ('nit', 'cufe', 'lectura', 'periodo', 'total a pagar'):
                 assert bad not in d
-        # La suma cuadra: warnings vacíos
         assert v.warnings == []
         assert v.requires_review is False
 
-    # ---- COJARDIN: NIT 901178470-1 + 1 producto ------------------------
     def test_cojardin_nit_dv_split(self):
         doc = ExtractedDocument(
             document_type='invoice',
@@ -366,12 +329,10 @@ class TestFacturasTipificadas:
         assert doc.supplier_tax_id == '901178470'
         assert doc.supplier_tax_id_verification_digit == '1'
         assert len(doc.line_items) == 1
-        # Nombre del proveedor no contiene adquiriente (Cliente)
         assert 'Cliente' not in doc.supplier_name
         assert v.warnings == []
         assert v.requires_review is False
 
-    # ---- CEDENAR: Servicio público (debe tener [] lineitems) -----------
     def test_cedenar_public_service_no_line_items(self):
         doc = ExtractedDocument(
             document_type='invoice',
@@ -409,19 +370,14 @@ class TestFacturasTipificadas:
         assert 'FAUX_LINE_ITEMS_DETECTED' in codes
         assert 'FAUX_LINE_ITEMS_STRIPPED' in codes
         assert len(v.line_items) == 0
-        # No se crean productos falsos
         for it in doc.line_items:
             d = (it.description or '').lower()
             for bad in ('lectura', 'periodo', 'consumo', 'histórico', 'histórico'):
-                # Está permitido que existan como warnings, no como items finales
                 assert True
-        # Los items reales están limpios
         assert v.line_items == []
-        # Valores se mantienen
         assert v.subtotal == Decimal('92000.00')
         assert v.total_amount == Decimal('124300.00')
 
-    # ---- FACTURA POS ----------------------------------------------------
     def test_pos_invoice_short_table(self):
         doc = ExtractedDocument(
             document_type='ticket',
@@ -463,7 +419,6 @@ class TestFacturasTipificadas:
         assert v.warnings == []
         assert v.requires_review is False
 
-    # ---- Factura Electrónica (múltiples fechas) ------------------------
     def test_electronic_invoice_multiple_dates(self):
         doc = ExtractedDocument(
             document_type='invoice',
@@ -489,18 +444,15 @@ class TestFacturasTipificadas:
         )
         raw = 'Cant Descripcion Valor Unit Subtotal IVA Total SETP Prefijo'
         v = validate_extracted(doc, raw_text_hint=raw)
-        # Todas las fechas preservadas (no pisa una con otra)
         assert doc.issue_date == '2024-08-15'
         assert doc.generation_date == '2024-08-14'
         assert doc.due_date == '2024-09-15'
         assert doc.billing_period == '2024-08'
-        # invoice_number = prefijo SETP... (no CUFE)
         assert doc.invoice_number == 'SETP990001234'
         assert doc.cufe == 'f' * 96
         assert v.warnings == []
         assert v.requires_review is False
 
-    # ---- D&W Construcción: descuentos + TOTAL_MISMATCH intencional ------
     def test_dw_construccion_mismatch_keeps_values(self):
         doc = ExtractedDocument(
             document_type='invoice',
@@ -512,7 +464,7 @@ class TestFacturasTipificadas:
             currency='COP',
             subtotal=Decimal('1000000.00'),
             taxes=[TaxItem(type='IVA', rate=Decimal('19'), amount=Decimal('171000.00'))],
-            total_amount=Decimal('1089000.00'),  # Errado intencionalmente
+            total_amount=Decimal('1089000.00'),
             line_items=[
                 LineItem(description='Ladrillo hueco x1000 und', quantity=Decimal('1'),
                          unit_price=Decimal('700000'), discount=Decimal('100000.00'),
@@ -524,38 +476,31 @@ class TestFacturasTipificadas:
         )
         raw = 'Cant Descripcion Vlr Unit Desc Vlr Total D&W Factura Nro DW-2024-1120'
         v = validate_extracted(doc, raw_text_hint=raw)
-        # No se cambian los valores
         assert v.subtotal == Decimal('1000000.00')
         assert v.total_amount == Decimal('1089000.00')
-        # Warning obligatorio
         codes = ' '.join(v.warnings)
         assert 'TOTAL_MISMATCH' in codes
         assert v.requires_review is True
 
-    # ---- InvoiceNumber estricto ----------------------------------------
     def test_invoice_number_only_by_explicit_label(self):
         from services.extraction.post_validator import validate_extracted as val
-        # Caso: documento con muchos números, solo uno es Factura No:
         doc = ExtractedDocument(
             supplier_tax_id='900123456',
             supplier_tax_id_verification_digit='7',
             invoice_number='FE-2024-0042',
             cufe='a' * 64,
         )
-        # Simular que alguien malintencionadamente igualó invoice_number == cufe:
         bad_invoice_equals_cufe = ExtractedDocument(
             supplier_tax_id='900123456',
-            invoice_number='a' * 64,  # == cufe
+            invoice_number='a' * 64,
             cufe='a' * 64,
         )
         v = val(bad_invoice_equals_cufe)
         codes = ' '.join(v.warnings)
         assert 'INVOICE_NUMBER_SUSPICIOUS' in codes
-        # El bueno pasa
         v2 = val(doc, raw_text_hint='NIT Factura No Cuenta Referencia')
         assert v2.warnings == [] or not any('INVOICE_NUMBER_SUSPICIOUS' in w for w in v2.warnings)
 
-    # ---- Documento sin tabla -> line_items = [] ------------------------
     def test_without_product_table_empty_items(self):
         doc = ExtractedDocument(
             document_type='invoice',
@@ -574,7 +519,6 @@ class TestFacturasTipificadas:
         assert len(v.line_items) == 0
         assert v.warnings == []
 
-    # ---- Categorías prohibidas no se convierten en productos ------------
     def test_bad_categories_not_converted_to_products(self):
         fake_prods = [
             'Fecha de emisión 2024-08-15',
@@ -602,10 +546,6 @@ class TestFacturasTipificadas:
         assert v.line_items == []
 
 
-# ---------------------------------------------------------------------------
-# 5. Processor integration (TR-4.x)
-# ---------------------------------------------------------------------------
-
 class TestProcessorIntegration:
     def test_structured_maps_to_processed_document(self):
         from services.document_processor.processor import (
@@ -613,7 +553,6 @@ class TestProcessorIntegration:
             ProcessedDocument,
         )
         processor = DocumentProcessor()
-        # Sin file_path, usamos solo apply_structured
         structured = ExtractedDocument(
             document_type='invoice',
             supplier_name='COJARDIN SAS',
@@ -648,7 +587,6 @@ class TestProcessorIntegration:
         assert pd.currency == 'COP'
         assert len(pd.line_items) == 1
         assert pd.line_items[0]['description'] == 'Jardineria mensual'
-        # warnings serializados en to_dict
         d = pd.to_dict()
         assert 'warnings' in d and isinstance(d['warnings'], list)
 
@@ -899,7 +837,6 @@ class TestExtractionPrecision:
         assert processed.raw.get('extraction_source') == 'gemini_structured'
 
     def test_successful_structured_does_not_keep_regex_guesses(self):
-        """A null from Gemini stays null. The regex parser must not fill it."""
         from unittest.mock import patch
         from services.document_processor.processor import DocumentProcessor
         from services.ocr.base import OCRResult
@@ -953,8 +890,6 @@ class TestExtractionPrecision:
 
 
 class TestRealInvoiceInterpretation:
-    """Cifras de facturas reales. El validador corre sobre los montos, sin simularlo."""
-
     def test_dw_iva_uses_taxable_base_not_subtotal(self):
         doc = ExtractedDocument(
             document_class='ELECTRONIC_INVOICE',

@@ -19,7 +19,7 @@ class BaseOCRService:
     name = 'base'
 
     def extract(self, file_path: str) -> OCRResult:
-        raise NotImplementedError('Las subclases deben implementar el método extract.')
+        raise NotImplementedError('Subclasses must implement extract().')
 
 
 class OCRServiceRegistry:
@@ -32,7 +32,7 @@ class OCRServiceRegistry:
     @classmethod
     def get(cls, name: str) -> BaseOCRService:
         if name not in cls._services:
-            raise KeyError(f'Servicio OCR "{name}" no registrado.')
+            raise KeyError(f'OCR service "{name}" is not registered.')
         return cls._services[name]()
 
     @classmethod

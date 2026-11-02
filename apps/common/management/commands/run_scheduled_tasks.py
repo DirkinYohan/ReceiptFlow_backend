@@ -6,7 +6,7 @@ from apps.common.scheduled import run_scheduled_tasks
 
 
 class Command(BaseCommand):
-    help = 'Ejecuta las tareas diarias: documentos atascados, avisos de vencimiento y limpieza de tokens.'
+    help = 'Runs the daily tasks: stuck documents, due-date reminders and token cleanup.'
 
     def handle(self, *args, **options):
         self.stdout.write(json.dumps(run_scheduled_tasks(), default=str, ensure_ascii=False))

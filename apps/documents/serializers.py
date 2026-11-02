@@ -75,7 +75,7 @@ class DocumentSerializer(serializers.ModelSerializer):
     category_name = serializers.CharField(source='category.name', read_only=True, default=None)
 
     def get_expense_id(self, obj):
-        if hasattr(obj, 'expense_pk'):  # annotated by DocumentViewSet.get_queryset
+        if hasattr(obj, 'expense_pk'):
             return obj.expense_pk
         return obj.expenses.order_by('-incurred_at').values_list('pk', flat=True).first()
 

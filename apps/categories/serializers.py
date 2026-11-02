@@ -58,5 +58,3 @@ class CategorySerializer(serializers.ModelSerializer):
         }
 
 
-
-

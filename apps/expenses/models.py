@@ -45,8 +45,6 @@ class Expense(models.Model):
         verbose_name='Usuario',
         db_index=True,
     )
-    # The expense exists because of the receipt: deleting the receipt deletes it too,
-    # otherwise re-uploading a receipt leaves the old expense counted twice.
     document = models.ForeignKey(
         'documents.Document',
         on_delete=models.CASCADE,

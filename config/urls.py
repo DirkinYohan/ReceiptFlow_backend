@@ -41,7 +41,6 @@ urlpatterns = [
 ]
 
 def serve_media(request, path):
-    # Django sends X-Frame-Options: DENY by default; the frontend must be able to embed the PDF.
     response = serve(request, path, document_root=settings.MEDIA_ROOT)
     response['Content-Security-Policy'] = f"frame-ancestors 'self' {settings.FRONTEND_URL}"
     return response

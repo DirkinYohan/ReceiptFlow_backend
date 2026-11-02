@@ -148,14 +148,14 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
                 email_service.send_email_verification(user)
             except Exception:
                 logger.exception(
-                    'No se pudo enviar el correo de verificación a %s', user.email
+                    'Could not send the verification email to %s', user.email
                 )
         else:
             try:
                 email_service.send_welcome(user)
             except Exception:
                 logger.exception(
-                    'No se pudo enviar el correo de bienvenida a %s', user.email
+                    'Could not send the welcome email to %s', user.email
                 )
         return user
 
@@ -362,7 +362,7 @@ class EmailVerificationSerializer(serializers.Serializer):
                 email_service.send_welcome(user)
             except Exception:
                 logger.exception(
-                    'No se pudo enviar el correo de bienvenida a %s', user.email
+                    'Could not send the welcome email to %s', user.email
                 )
         return user
 
