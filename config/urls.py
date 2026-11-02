@@ -5,6 +5,8 @@ from django.urls import include, path, re_path
 from django.views.decorators.clickjacking import xframe_options_exempt
 from django.views.static import serve
 
+from apps.common.scheduled import health_view, scheduled_tasks_view
+
 from drf_spectacular.views import (
     SpectacularAPIView,
     SpectacularRedocView,
@@ -13,6 +15,8 @@ from drf_spectacular.views import (
 
 urlpatterns = [
     path('admin/', admin.site.urls),
+    path('healthz/', health_view, name='health'),
+    path('api/internal/run-scheduled-tasks/', scheduled_tasks_view, name='run-scheduled-tasks'),
 
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
     path(
