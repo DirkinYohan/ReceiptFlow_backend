@@ -11,8 +11,12 @@ class IsOwnerOrAdmin(BasePermission):
     def has_object_permission(self, request, view, obj):
         if request.user.is_staff:
             return True
-        owner = getattr(obj, self.owner_field, None)
-        return owner == request.user
+        # Compare ids: reading obj.user would cost a query (or a JOIN) per object.
+        owner_id = getattr(obj, f'{self.owner_field}_id', None)
+        if owner_id is None:
+            owner = getattr(obj, self.owner_field, None)
+            owner_id = getattr(owner, 'pk', None)
+        return owner_id is not None and owner_id == request.user.pk
 
 
 class IsStaffOrReadOnly(BasePermission):

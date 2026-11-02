@@ -4,7 +4,7 @@ import logging
 from time import perf_counter
 
 from django.db import transaction
-from django.db.models import Count, Sum, Q
+from django.db.models import Count, OuterRef, Q, Subquery, Sum
 from django_filters import rest_framework as filters
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
@@ -13,7 +13,7 @@ from rest_framework.response import Response
 
 from apps.expenses.automation import learn_supplier_category, sync_expense_safely
 from apps.documents.payables import payables_overview
-from apps.documents.review_messages import humanize_all
+from apps.documents.review_messages import humanize_all, language_from
 from apps.common.pagination import StandardPagination
 from apps.common.permissions import IsOwnerOrAdmin
 from apps.common.ratelimit import (
@@ -22,7 +22,10 @@ from apps.common.ratelimit import (
 )
 from apps.common.validators import validate_uploaded_file
 
-from .models import Document
+from apps.common.queries import count_of
+from apps.expenses.models import Expense
+
+from .models import Document, ExpenseItem
 from .serializers import (
     DocumentCreateSerializer,
     DocumentDetailSerializer,
@@ -47,10 +50,10 @@ def _is_stale(document) -> bool:
     return started is None or timezone.now() - started > limit
 
 
-def _review_reasons(document) -> list[str]:
+def _review_reasons(document, lang: str = 'es') -> list[str]:
     raw = [r for r in (document.processing_error or '').split('; ') if r.strip()]
     raw += list((document.structured_data or {}).get('warnings') or [])
-    return humanize_all(raw, currency=document.currency or '')
+    return humanize_all(raw, currency=document.currency or '', lang=lang)
 
 
 def _missing_fields(document) -> list[str]:
@@ -93,12 +96,22 @@ class DocumentViewSet(viewsets.ModelViewSet):
             return Document.objects.none()
         qs = (
             Document.objects.filter(user=self.request.user)
-            .select_related('user', 'supplier', 'category')
-            .annotate(line_items_count=Count('line_items', distinct=True))
+            .select_related('supplier', 'category')
+            .annotate(
+                line_items_count=count_of(ExpenseItem, 'document'),
+                # The linked expense in the same query (it used to cost 2 queries per row).
+                expense_pk=Subquery(
+                    Expense.objects.filter(document=OuterRef('pk')).order_by('-incurred_at').values('pk')[:1]
+                ),
+            )
         )
-        if self.action in ('retrieve', 'update_extracted_data'):
+        if self.action in ('retrieve', 'update_extracted_data', 'review_queue'):
             qs = qs.prefetch_related('line_items')
         return qs
+
+    def _fresh(self, document):
+        """Re-read after a write so counts and the linked expense in the response are current."""
+        return self.get_queryset().prefetch_related('line_items').get(pk=document.pk)
 
     def get_serializer_class(self):
         if self.action == 'create':
@@ -214,7 +227,7 @@ class DocumentViewSet(viewsets.ModelViewSet):
                 'status': 'success',
                 'message': 'Documento actualizado correctamente.',
                 'data': DocumentDetailSerializer(
-                    instance=instance, context={'request': request}
+                    instance=self._fresh(instance), context={'request': request}
                 ).data,
             },
             status=status.HTTP_200_OK,
@@ -304,7 +317,7 @@ class DocumentViewSet(viewsets.ModelViewSet):
                     'status': 'success',
                     'message': 'Documento procesado.',
                     'data': DocumentDetailSerializer(
-                        document, context={'request': request}
+                        self._fresh(document), context={'request': request}
                     ).data,
                 },
                 status=status.HTTP_200_OK,
@@ -436,7 +449,7 @@ class DocumentViewSet(viewsets.ModelViewSet):
                 'status': 'success',
                 'message': 'Datos del documento actualizados.',
                 'data': DocumentDetailSerializer(
-                    document, context={'request': request}
+                    self._fresh(document), context={'request': request}
                 ).data,
             },
             status=status.HTTP_200_OK,
@@ -445,18 +458,15 @@ class DocumentViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'], url_path='review-queue')
     def review_queue(self, request):
         docs = (
-            Document.objects.filter(
-                user=request.user,
-                status__in=[Document.STATUS_REVIEW_REQUIRED, Document.STATUS_FAILED],
-            )
-            .select_related('supplier', 'category')
-            .prefetch_related('line_items')
+            self.get_queryset()
+            .filter(status__in=[Document.STATUS_REVIEW_REQUIRED, Document.STATUS_FAILED])
             .order_by('created_at')
         )
+        lang = language_from(request)
         items = []
         for doc in docs:
             data = DocumentDetailSerializer(doc, context={'request': request}).data
-            data['review_reasons'] = _review_reasons(doc)
+            data['review_reasons'] = _review_reasons(doc, lang)
             data['missing_fields'] = _missing_fields(doc)
             items.append(data)
         return Response(

@@ -15,6 +15,8 @@ from apps.expenses.automation import learn_supplier_category
 from apps.expenses.exports import build_csv, build_xlsx, export_queryset
 from apps.expenses.recurring import recurring_overview, refresh_supplier_recurrence
 from apps.common.pagination import StandardPagination
+from apps.common.queries import count_of
+from apps.documents.models import ExpenseItem as DocumentExpenseItem
 from apps.common.permissions import IsOwnerOrAdmin
 from apps.documents.models import Document
 
@@ -62,8 +64,8 @@ class ExpenseViewSet(viewsets.ModelViewSet):
             return Expense.objects.none()
         qs = (
             Expense.objects.filter(user=self.request.user)
-            .select_related('user', 'category', 'supplier', 'document')
-            .annotate(line_items_count=Count('line_items', distinct=True))
+            .select_related('category', 'supplier', 'document')
+            .annotate(line_items_count=count_of(DocumentExpenseItem, 'expense'))
         )
         if self.action in ('retrieve', 'create_from_document'):
             qs = qs.prefetch_related('line_items')

@@ -135,8 +135,10 @@ class Supplier(models.Model):
 
     @property
     def document_count(self) -> int:
-        return getattr(self, '_document_count', None) or self.documents.count()
+        annotated = getattr(self, '_document_count', None)
+        return self.documents.count() if annotated is None else annotated
 
     @property
     def expense_count(self) -> int:
-        return getattr(self, '_expense_count', None) or self.expenses.count()
+        annotated = getattr(self, '_expense_count', None)
+        return self.expenses.count() if annotated is None else annotated

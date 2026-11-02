@@ -2,8 +2,11 @@ from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from typing import Optional
 
-from django.db.models import Avg, Count, DecimalField, ExpressionWrapper, F, Max, Min, Q, Sum
-from django.db.models.functions import TruncMonth, ExtractMonth, ExtractYear
+from django.contrib.auth import get_user_model
+from django.db.models import (
+    Avg, Count, DecimalField, ExpressionWrapper, F, IntegerField, Max, Min, OuterRef, Q, Subquery, Sum, Value,
+)
+from django.db.models.functions import Coalesce, ExtractMonth, ExtractYear, TruncMonth
 from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
@@ -16,12 +19,21 @@ from apps.documents.models import Document
 from apps.expenses.models import Expense
 from apps.suppliers.models import Supplier
 
+User = get_user_model()
+
 
 # What the user actually paid for an expense (same formula as Expense.total_amount).
 EXPENSE_TOTAL = ExpressionWrapper(
     F('amount') + F('tax_amount') - F('discount_amount') + F('tip_amount'),
     output_field=DecimalField(max_digits=14, decimal_places=2),
 )
+
+
+def count_rows(queryset):
+    """COUNT(*) of a correlated queryset as a scalar subquery."""
+    # Group by a constant so COUNT works inside a scalar subquery.
+    rows = queryset.order_by().annotate(_one=Value(1)).values('_one').annotate(total=Count('pk')).values('total')
+    return Coalesce(Subquery(rows, output_field=IntegerField()), 0)
 
 
 def _parse_bound(value: Optional[str], end: bool = False) -> Optional[datetime]:
@@ -63,53 +75,35 @@ class DashboardViewSet(viewsets.ViewSet):
         start_date, end_date = _get_date_range(request)
         user = request.user
 
-        expense_qs = Expense.objects.filter(
-            user=user,
-            incurred_at__gte=start_date,
-            incurred_at__lte=end_date,
-        )
-        document_qs = Document.objects.filter(
-            user=user,
-            created_at__gte=start_date,
-            created_at__lte=end_date,
-        )
-        expense_stats = expense_qs.aggregate(
-            total=Sum('amount', default=Decimal('0'))
-            + Sum('tax_amount', default=Decimal('0'))
-            - Sum('discount_amount', default=Decimal('0'))
-            + Sum('tip_amount', default=Decimal('0')),
-            count=Count('id'),
-            avg=Avg(EXPENSE_TOTAL, default=Decimal('0')),
-            max=Max(EXPENSE_TOTAL),
-            min=Min(EXPENSE_TOTAL),
+        previous_start = start_date - (end_date - start_date)
+        current = Q(incurred_at__gte=start_date, incurred_at__lte=end_date)
+        previous = Q(incurred_at__gte=previous_start, incurred_at__lt=start_date)
+        # One query for both periods (the previous one only feeds the variation %).
+        expense_stats = Expense.objects.filter(user=user, incurred_at__gte=previous_start, incurred_at__lte=end_date).aggregate(
+            total=Sum(EXPENSE_TOTAL, filter=current, default=Decimal('0')),
+            count=Count('id', filter=current),
+            avg=Avg(EXPENSE_TOTAL, filter=current, default=Decimal('0')),
+            max=Max(EXPENSE_TOTAL, filter=current),
+            min=Min(EXPENSE_TOTAL, filter=current),
+            previous_total=Sum(EXPENSE_TOTAL, filter=previous, default=Decimal('0')),
         )
         expense_total = expense_stats['total'] or Decimal('0')
-
-        doc_stats = document_qs.aggregate(
-            total=Count('id'),
-            completed=Count('id', filter=Q(status=Document.STATUS_COMPLETED)),
-        )
-        total_documents = doc_stats['total']
-        completed_documents = doc_stats['completed']
-
-        previous_start = start_date - (end_date - start_date)
-        previous_expense_total = (
-            Expense.objects.filter(
-                user=user,
-                incurred_at__gte=previous_start,
-                incurred_at__lt=start_date,
-            ).aggregate(
-                total=Sum('amount', default=Decimal('0'))
-                + Sum('tax_amount', default=Decimal('0'))
-                - Sum('discount_amount', default=Decimal('0'))
-                + Sum('tip_amount', default=Decimal('0'))
-            )['total']
-            or Decimal('0')
-        )
+        previous_expense_total = expense_stats['previous_total'] or Decimal('0')
         if previous_expense_total > 0:
             change_pct = float(expense_total - previous_expense_total) / float(previous_expense_total) * 100
         else:
             change_pct = 0.0 if expense_total == 0 else 100.0
+
+        # Document and catalogue counts in a single row.
+        in_period = Document.objects.filter(user=OuterRef('pk'), created_at__gte=start_date, created_at__lte=end_date)
+        counts = User.objects.filter(pk=user.pk).annotate(
+            documents_total=count_rows(in_period),
+            documents_completed=count_rows(in_period.filter(status=Document.STATUS_COMPLETED)),
+            suppliers_total=count_rows(Supplier.objects.filter(user=OuterRef('pk'))),
+            categories_total=count_rows(
+                Category.objects.filter(Q(scope=Category.SCOPE_SYSTEM) | Q(user=OuterRef('pk')))
+            ),
+        ).values('documents_total', 'documents_completed', 'suppliers_total', 'categories_total').get()
 
         data = {
             'total_expenses': expense_total,
@@ -117,12 +111,10 @@ class DashboardViewSet(viewsets.ViewSet):
             'average_expense': expense_stats['avg'] or 0,
             'max_expense': expense_stats['max'],
             'min_expense': expense_stats['min'],
-            'documents_count': total_documents,
-            'documents_processed': completed_documents,
-            'suppliers_count': Supplier.objects.filter(user=user).count(),
-            'categories_count': Category.objects.filter(
-                Q(scope=Category.SCOPE_SYSTEM) | Q(user=user)
-            ).count(),
+            'documents_count': counts['documents_total'],
+            'documents_processed': counts['documents_completed'],
+            'suppliers_count': counts['suppliers_total'],
+            'categories_count': counts['categories_total'],
             'expense_variation_pct': round(change_pct, 2),
             'period': {
                 'start': start_date.isoformat(),

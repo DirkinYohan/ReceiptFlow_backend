@@ -6,6 +6,9 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from apps.common.queries import count_of
+from apps.documents.models import Document
+from apps.expenses.models import Expense
 from apps.common.pagination import StandardPagination
 from apps.common.permissions import IsOwnerOrAdmin
 
@@ -37,8 +40,8 @@ class SupplierViewSet(viewsets.ModelViewSet):
         if getattr(self, 'swagger_fake_view', False):
             return Supplier.objects.none()
         return Supplier.objects.filter(user=self.request.user).annotate(
-            _document_count=Count('documents', distinct=True),
-            _expense_count=Count('expenses', distinct=True),
+            _document_count=count_of(Document, 'supplier'),
+            _expense_count=count_of(Expense, 'supplier'),
         )
 
     def perform_create(self, serializer):
