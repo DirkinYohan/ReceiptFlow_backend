@@ -76,7 +76,9 @@ services:
         sync: false
       - key: CORS_ALLOWED_ORIGINS
         sync: false
-      # --- Email ---
+      # --- Email (Render free blocks SMTP; with BREVO_API_KEY set, mail goes through the Brevo API) ---
+      - key: BREVO_API_KEY
+        sync: false
       - key: EMAIL_BACKEND
         value: django.core.mail.backends.smtp.EmailBackend
       - key: EMAIL_HOST

@@ -188,3 +188,33 @@ class TestUserLogin:
             logout_url, {'refresh': refresh_token}, format='json',
         )
         assert logout_response.status_code == status.HTTP_200_OK
+
+
+@pytest.mark.django_db
+class TestBrevoEmail:
+    @override_settings(
+        EMAIL_BACKEND='anymail.backends.brevo.EmailBackend',
+        ANYMAIL={'BREVO_API_KEY': 'test-brevo-key', 'REQUESTS_TIMEOUT': 10},
+        DEFAULT_FROM_EMAIL='ReceiptFlow <sender@receiptflow.com>',
+        EMAIL_SEND_IN_BACKGROUND=False,
+    )
+    def test_verification_email_goes_through_brevo_api(self, user):
+        import json
+        from unittest.mock import MagicMock, patch
+
+        from apps.users.services import email_service
+
+        response = MagicMock(status_code=201)
+        response.json.return_value = {'messageId': '<abc@smtp-relay.brevo.com>'}
+        with patch('requests.Session.request', return_value=response) as request:
+            assert email_service.send_email_verification(user) is True
+
+        kwargs = request.call_args.kwargs
+        assert kwargs['method'].upper() == 'POST'
+        assert kwargs['url'] == 'https://api.brevo.com/v3/smtp/email'
+        assert kwargs['headers']['api-key'] == 'test-brevo-key'
+        assert kwargs['timeout'] == 10
+        payload = json.loads(kwargs['data'])
+        assert payload['to'] == [{'email': user.email}]
+        assert payload['sender']['email'] == 'sender@receiptflow.com'
+        assert 'verify-email?token=' in payload['htmlContent']
