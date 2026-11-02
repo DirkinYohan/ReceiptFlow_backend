@@ -151,7 +151,10 @@ class DocumentViewSet(viewsets.ModelViewSet):
         try:
             document = document_service.create_document(request.user, file_obj, **extra)
         except Exception as exc:
-            logger.exception('Error creating document for user %s', request.user.pk)
+            logger.exception(
+                'Error creating document for user %s (storage response: %s)',
+                request.user.pk, getattr(exc, 'response', None),
+            )
             return Response(
                 {'status': 'error', 'message': f'Error al subir el documento: {exc}'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,

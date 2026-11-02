@@ -425,6 +425,8 @@ if STORAGE_BACKEND == 'gcs':
         },
     }
 elif STORAGE_BACKEND == 's3':
+    from botocore.config import Config as BotoConfig
+
     STORAGES = {
         'default': {
             'BACKEND': 'storages.backends.s3.S3Storage',
@@ -436,6 +438,12 @@ elif STORAGE_BACKEND == 's3':
                 'secret_key': env('S3_SECRET_ACCESS_KEY', default=''),
                 'addressing_style': 'path',
                 'signature_version': 's3v4',
+                'client_config': BotoConfig(
+                    s3={'addressing_style': 'path'},
+                    signature_version='s3v4',
+                    request_checksum_calculation='when_required',
+                    response_checksum_validation='when_required',
+                ),
                 'default_acl': None,
                 'querystring_auth': True,
                 'querystring_expire': 60 * 60,
