@@ -90,3 +90,30 @@ class TestSettledReceipt:
         doc = Document(user=user, document_type=Document.DOCUMENT_TYPE_INVOICE)
         apply_payment_inference(doc, 'SERVICE_INVOICE', {'settled_by_payment': True})
         assert doc.is_paid is True
+
+
+class TestEnglishReasons:
+    def test_total_mismatch_in_english(self):
+        text = humanize(SALDO_APPS_WARNINGS[0], 'USD', lang='en')
+        assert text == (
+            "The math doesn't add up: subtotal USD 8,000 + taxes USD 450 is USD 8,450, "
+            'but the printed total is USD 8,480.'
+        )
+
+    def test_backend_spanish_reasons_are_translated(self):
+        assert humanize('No se identificó el monto total.', lang='en') == 'The total amount was not found.'
+        assert humanize(
+            'Este archivo ya lo habías subido (documento #53). Descártalo o apruébalo si de verdad es otro gasto.',
+            lang='en',
+        ).startswith('You already uploaded this file (document #53).')
+
+    def test_review_queue_follows_accept_language(self, auth_client, user):
+        from apps.documents.models import Document
+        Document.objects.create(
+            user=user, file='fake/x.png', status=Document.STATUS_REVIEW_REQUIRED,
+            processing_error='No se identificó el monto total.',
+        )
+        en = auth_client.get('/api/v1/documents/review-queue/', HTTP_ACCEPT_LANGUAGE='en')
+        es = auth_client.get('/api/v1/documents/review-queue/', HTTP_ACCEPT_LANGUAGE='es')
+        assert en.data['data']['results'][0]['review_reasons'] == ['The total amount was not found.']
+        assert es.data['data']['results'][0]['review_reasons'] == ['No se identificó el monto total.']
