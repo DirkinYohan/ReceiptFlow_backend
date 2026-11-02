@@ -18,6 +18,8 @@ SECRET_KEY = env('DJANGO_SECRET_KEY')
 DEBUG = env('DJANGO_DEBUG')
 ALLOWED_HOSTS = env.list('DJANGO_ALLOWED_HOSTS', default=['localhost', '127.0.0.1'])
 FRONTEND_URL = env('APP_FRONTEND_URL', default='http://localhost:3000')
+# Shared secret for the external scheduler (see apps/common/scheduled.py). Empty = endpoint disabled.
+CRON_SECRET = env('CRON_SECRET', default='')
 
 DJANGO_APPS = [
     'django.contrib.admin',
@@ -40,6 +42,7 @@ THIRD_PARTY_APPS = [
 ]
 
 LOCAL_APPS = [
+    'apps.common',
     'apps.users',
     'apps.documents',
     'apps.expenses',
@@ -53,7 +56,12 @@ INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
+    # Outermost of the API's own: translates its Spanish messages when the client asks for English.
+    'apps.common.i18n.ApiLanguageMiddleware',
+    'apps.common.middleware.PrivateApiCacheMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
+    # Picks the language from Accept-Language, so Django/DRF messages follow the app's language.
+    'django.middleware.locale.LocaleMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
@@ -96,6 +104,16 @@ DATABASES = {
         },
     }
 }
+# The database is remote (Supabase): opening a TLS connection costs ~0.7 s per request.
+# A shared pool reuses connections across requests and threads (runserver included).
+# DB_POOL=False turns it off, e.g. behind Supabase's transaction pooler (port 6543).
+if env.bool('DB_POOL', default=True):
+    DATABASES['default']['OPTIONS']['pool'] = {
+        'min_size': env.int('DB_POOL_MIN_SIZE', default=4),
+        'max_size': env.int('DB_POOL_MAX_SIZE', default=8),
+        'timeout': 10,
+        'max_idle': 300,
+    }
 
 AUTH_PASSWORD_VALIDATORS = [
     {
@@ -124,6 +142,10 @@ PASSWORD_HASHERS = [
 LANGUAGE_CODE = 'es'
 TIME_ZONE = 'America/Bogota'
 USE_I18N = True
+LANGUAGES = [
+    ('es', 'Español'),
+    ('en', 'English'),
+]
 USE_TZ = True
 
 STATIC_URL = '/static/'
@@ -278,28 +300,45 @@ LOGGING = {
 # ------------------------------------------------------------------------------
 # Cache / Redis
 # ------------------------------------------------------------------------------
-REDIS_URL = env('REDIS_URL', default='redis://localhost:6379/0')
-CACHES = {
-    'default': {
-        'BACKEND': 'django.core.cache.backends.redis.RedisCache',
-        'LOCATION': REDIS_URL,
-        'TIMEOUT': 300,
-        'OPTIONS': {
-            'socket_connect_timeout': 5,
-            'socket_timeout': 5,
+# Redis is optional: Render's free plan has no worker for Celery, so without REDIS_URL
+# the app keeps its cache in memory and reads documents inside the upload request.
+REDIS_URL = env('REDIS_URL', default='')
+if REDIS_URL:
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+            'LOCATION': REDIS_URL,
+            'TIMEOUT': 300,
+            'OPTIONS': {
+                'socket_connect_timeout': 5,
+                'socket_timeout': 5,
+            },
         },
-    },
-    'celery-broker': {
-        'BACKEND': 'django.core.cache.backends.redis.RedisCache',
-        'LOCATION': REDIS_URL,
-    },
-}
+        'celery-broker': {
+            'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+            'LOCATION': REDIS_URL,
+        },
+    }
+else:
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+            'LOCATION': 'receiptflow-cache',
+        },
+        'celery-broker': {
+            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+            'LOCATION': 'receiptflow-celery',
+        },
+    }
 SESSION_ENGINE = 'django.contrib.sessions.backends.cached_db'
 
 # ------------------------------------------------------------------------------
 # Celery
 # ------------------------------------------------------------------------------
-CELERY_BROKER_URL = env('CELERY_BROKER_URL', default=REDIS_URL)
+CELERY_BROKER_URL = env('CELERY_BROKER_URL', default=REDIS_URL or 'memory://')
+# No broker -> run tasks inline (the document is read during the upload request).
+CELERY_TASK_ALWAYS_EAGER = env.bool('CELERY_TASK_ALWAYS_EAGER', default=not REDIS_URL)
+CELERY_TASK_EAGER_PROPAGATES = CELERY_TASK_ALWAYS_EAGER
 CELERY_RESULT_BACKEND = env('CELERY_RESULT_BACKEND', default='django-db')
 if CELERY_RESULT_BACKEND == 'django-db':
     CELERY_RESULT_BACKEND = 'django-db'
@@ -408,6 +447,31 @@ if STORAGE_BACKEND == 'gcs':
                 'blob_chunk_size': 5 * 1024 * 1024,
                 'file_overwrite': False,
                 'expiration': 60 * 60 * 24 * 7,
+            },
+        },
+        'staticfiles': {
+            'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage',
+        },
+    }
+elif STORAGE_BACKEND == 's3':
+    # Any S3-compatible bucket; on Render we use Supabase Storage, because the server's
+    # own disk is wiped every time a free instance sleeps or redeploys.
+    STORAGES = {
+        'default': {
+            'BACKEND': 'storages.backends.s3.S3Storage',
+            'OPTIONS': {
+                'bucket_name': env('S3_BUCKET_NAME', default=''),
+                'endpoint_url': env('S3_ENDPOINT_URL', default=''),
+                'region_name': env('S3_REGION', default=''),
+                'access_key': env('S3_ACCESS_KEY_ID', default=''),
+                'secret_key': env('S3_SECRET_ACCESS_KEY', default=''),
+                'addressing_style': 'path',
+                'signature_version': 's3v4',
+                # Receipts are private: links are signed and expire.
+                'default_acl': None,
+                'querystring_auth': True,
+                'querystring_expire': 60 * 60,
+                'file_overwrite': False,
             },
         },
         'staticfiles': {
