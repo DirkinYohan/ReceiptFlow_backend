@@ -61,18 +61,22 @@ def ratelimit_auth_verify_email():
 
 
 def ratelimit_documents_create():
-    return ratelimit(
-        key='user_or_ip',
-        rate=get_ratelimit_rate('RATELIMIT_DOCUMENTS_CREATE', '20/m'),
-        method=['POST'],
-        block=True,
+    return method_decorator(
+        ratelimit(
+            key='user_or_ip',
+            rate=get_ratelimit_rate('RATELIMIT_DOCUMENTS_CREATE', '20/m'),
+            method=['POST'],
+            block=True,
+        ),
     )
 
 
 def ratelimit_documents_process():
-    return ratelimit(
-        key='user_or_ip',
-        rate=get_ratelimit_rate('RATELIMIT_DOCUMENTS_PROCESS', '15/m'),
-        method=['POST'],
-        block=True,
+    return method_decorator(
+        ratelimit(
+            key='user_or_ip',
+            rate=get_ratelimit_rate('RATELIMIT_DOCUMENTS_PROCESS', '15/m'),
+            method=['POST'],
+            block=True,
+        ),
     )

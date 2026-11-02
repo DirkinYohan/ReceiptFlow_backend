@@ -291,6 +291,27 @@ class TestRateLimiting:
             status.HTTP_429_TOO_MANY_REQUESTS,
         )
 
+    def test_document_upload_with_rate_limit_enabled(self, auth_client, settings):
+        from django.core.cache import cache
+        from PIL import Image
+
+        settings.RATELIMIT_ENABLE = True
+        settings.RATELIMIT_DOCUMENTS_CREATE = '1/m'
+        cache.clear()
+
+        def png(name):
+            buf = io.BytesIO()
+            Image.new('RGB', (20, 20), color='blue').save(buf, format='PNG')
+            return SimpleUploadedFile(name, buf.getvalue(), content_type='image/png')
+
+        with patch('apps.documents.tasks.process_document_task.delay'):
+            first = auth_client.post('/api/v1/documents/', {'file': png('a.png')}, format='multipart')
+            second = auth_client.post('/api/v1/documents/', {'file': png('b.png')}, format='multipart')
+        cache.clear()
+
+        assert first.status_code == status.HTTP_201_CREATED
+        assert second.status_code in (status.HTTP_403_FORBIDDEN, status.HTTP_429_TOO_MANY_REQUESTS)
+
 
 @pytest.mark.django_db
 class TestSwaggerOpenAPI:
