@@ -56,6 +56,22 @@ class TestExpenseEndpoints:
         results = data.get('results') or data.get('data') or []
         assert len(list(results)) >= 1
 
+    def test_list_and_detail_include_category_and_supplier_names(self, auth_client, expense):
+        listed = auth_client.get('/api/v1/expenses/').json()
+        rows = listed.get('results') or listed.get('data') or []
+        row = next(item for item in rows if item['id'] == expense.pk)
+        assert row['category_name'] == expense.category.name
+        assert row['supplier_name'] == expense.supplier.name
+
+        detail = auth_client.get(f'/api/v1/expenses/{expense.pk}/').json()['data']
+        assert detail['category_name'] == expense.category.name
+        assert detail['supplier_name'] == expense.supplier.name
+
+    def test_expense_without_supplier_has_null_supplier_name(self, auth_client, expense):
+        Expense.objects.filter(pk=expense.pk).update(supplier=None)
+        detail = auth_client.get(f'/api/v1/expenses/{expense.pk}/').json()['data']
+        assert detail['supplier_name'] is None
+
     def test_expense_filter_by_category(self, auth_client, user, system_categories, supplier):
         cat_food, cat_transport = system_categories[0], system_categories[1]
         Expense.objects.create(

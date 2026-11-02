@@ -35,6 +35,8 @@ class ExpenseSerializer(serializers.ModelSerializer):
         max_digits=14, decimal_places=2, read_only=True,
     )
     line_items_count = serializers.IntegerField(read_only=True)
+    category_name = serializers.CharField(source='category.name', read_only=True, default=None)
+    supplier_name = serializers.CharField(source='supplier.name', read_only=True, default=None)
 
     class Meta:
         model = Expense
@@ -42,7 +44,9 @@ class ExpenseSerializer(serializers.ModelSerializer):
             'id',
             'document',
             'category',
+            'category_name',
             'supplier',
+            'supplier_name',
             'description',
             'amount',
             'tax_amount',
