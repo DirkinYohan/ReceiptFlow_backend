@@ -218,3 +218,72 @@ class TestBrevoEmail:
         assert payload['to'] == [{'email': user.email}]
         assert payload['sender']['email'] == 'sender@receiptflow.com'
         assert 'verify-email?token=' in payload['htmlContent']
+
+
+@pytest.mark.django_db
+class TestPasswordReset:
+    NEW_PASSWORD = 'Nuev4Clave!Segura'
+
+    def _login(self, api_client, email, password):
+        return api_client.post('/api/auth/login/', {'email': email, 'password': password}, format='json')
+
+    def test_reset_saves_the_new_password(self, api_client, user, user_password):
+        api_client.post('/api/auth/password-reset/', {'email': user.email}, format='json')
+        user.refresh_from_db()
+        token = user.password_reset_token
+        assert token
+
+        response = api_client.post('/api/auth/password-reset/confirm/', {
+            'email': user.email,
+            'token': token,
+            'new_password': self.NEW_PASSWORD,
+            'confirm_password': self.NEW_PASSWORD,
+        }, format='json')
+        assert response.status_code == status.HTTP_200_OK
+
+        user.refresh_from_db()
+        assert user.check_password(self.NEW_PASSWORD)
+        assert user.password_reset_token == ''
+        assert self._login(api_client, user.email, self.NEW_PASSWORD).status_code == status.HTTP_200_OK
+        assert self._login(api_client, user.email, user_password).status_code == status.HTTP_401_UNAUTHORIZED
+
+    def test_reset_token_cannot_be_reused(self, api_client, user):
+        token = user.regenerate_password_reset_token()
+        payload = {
+            'email': user.email,
+            'token': token,
+            'new_password': self.NEW_PASSWORD,
+            'confirm_password': self.NEW_PASSWORD,
+        }
+        assert api_client.post('/api/auth/password-reset/confirm/', payload, format='json').status_code == 200
+        second = api_client.post('/api/auth/password-reset/confirm/', payload, format='json')
+        assert second.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_reset_rejects_weak_password_with_field_error(self, api_client, user, user_password):
+        token = user.regenerate_password_reset_token()
+        response = api_client.post('/api/auth/password-reset/confirm/', {
+            'email': user.email,
+            'token': token,
+            'new_password': '12345678',
+            'confirm_password': '12345678',
+        }, format='json')
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        fields = {item['field'] for item in response.json().get('errors', [])}
+        assert 'new_password' in fields
+        user.refresh_from_db()
+        assert user.check_password(user_password)
+
+
+@pytest.mark.django_db
+class TestChangePassword:
+    def test_change_password_from_profile(self, auth_client, api_client, user, user_password):
+        new_password = 'Otr4Clave!Distinta'
+        response = auth_client.put('/api/v1/users/me/change-password/', {
+            'current_password': user_password,
+            'new_password': new_password,
+            'confirm_password': new_password,
+        }, format='json')
+        assert response.status_code == status.HTTP_200_OK
+        user.refresh_from_db()
+        assert user.check_password(new_password)
+        assert not user.check_password(user_password)

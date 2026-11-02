@@ -4,6 +4,7 @@ import re
 from django.conf import settings
 from django.contrib.auth import get_user_model, password_validation
 from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.utils import timezone
 from rest_framework import serializers
 from rest_framework.exceptions import AuthenticationFailed
@@ -120,7 +121,7 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
             )
         try:
             validate_password(data['password'])
-        except serializers.ValidationError as exc:
+        except DjangoValidationError as exc:
             raise serializers.ValidationError({'password': exc.messages})
         return data
 
@@ -257,7 +258,7 @@ class ChangePasswordSerializer(serializers.Serializer):
             )
         try:
             validate_password(data['new_password'], user=self.context['request'].user)
-        except serializers.ValidationError as exc:
+        except DjangoValidationError as exc:
             raise serializers.ValidationError({'new_password': exc.messages})
         return data
 
@@ -314,7 +315,7 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
             )
         try:
             validate_password(data['new_password'], user=user)
-        except serializers.ValidationError as exc:
+        except DjangoValidationError as exc:
             raise serializers.ValidationError({'new_password': exc.messages})
         self._user = user
         return data
@@ -322,7 +323,9 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
     def save(self, **kwargs):
         user = self._user
         user.set_password(self.validated_data['new_password'])
-        user.clear_password_reset_token()
+        user.password_reset_token = ''
+        user.password_reset_sent_at = None
+        user.save(update_fields=['password', 'password_reset_token', 'password_reset_sent_at', 'updated_at'])
         return user
 
 
