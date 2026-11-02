@@ -41,6 +41,27 @@ class TestUserRegistration:
         assert len(mail.outbox) == 1
         assert mail.outbox[0].to == ['new@receiptflow.com']
 
+    @override_settings(EMAIL_VERIFICATION_REQUIRED=True, EMAIL_SEND_IN_BACKGROUND=True)
+    def test_register_does_not_wait_for_a_blocked_mail_server(self, api_client):
+        import threading
+        from unittest.mock import patch
+
+        release = threading.Event()
+        delivered = threading.Event()
+
+        def blocked_delivery(email, to_email, template_name):
+            release.wait(5)
+            delivered.set()
+            return True
+
+        with patch('apps.users.services._deliver', side_effect=blocked_delivery):
+            response = api_client.post('/api/auth/register/', self.REGISTER_PAYLOAD, format='json')
+            assert response.status_code == status.HTTP_201_CREATED
+            assert not delivered.is_set()
+            release.set()
+            assert delivered.wait(5)
+        assert User.objects.filter(email='new@receiptflow.com').exists()
+
     @override_settings(EMAIL_VERIFICATION_REQUIRED=True)
     def test_unverified_user_cannot_log_in(self, api_client):
         api_client.post('/api/auth/register/', self.REGISTER_PAYLOAD, format='json')

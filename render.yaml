@@ -32,6 +32,8 @@ services:
         value: "2"
       - key: DOCUMENT_BACKGROUND_THREADS
         value: "true"
+      - key: EMAIL_SEND_IN_BACKGROUND
+        value: "true"
       # --- Database (Supabase, Session pooler) ---
       - key: DB_HOST
         sync: false

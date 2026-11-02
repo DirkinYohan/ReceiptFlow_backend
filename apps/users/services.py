@@ -1,4 +1,5 @@
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
 from django.conf import settings
@@ -12,6 +13,17 @@ from django.utils.html import strip_tags
 logger = logging.getLogger(__name__)
 
 User = get_user_model()
+
+_email_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix='receiptflow-email')
+
+
+def _deliver(email: EmailMultiAlternatives, to_email: str, template_name: str) -> bool:
+    try:
+        email.send(fail_silently=False)
+        return True
+    except Exception:
+        logger.exception('Error sending email to %s with template %s', to_email, template_name)
+        return False
 
 
 class EmailService:
@@ -32,11 +44,13 @@ class EmailService:
                 to=[to_email],
             )
             email.attach_alternative(html_message, 'text/html')
-            email.send(fail_silently=False)
-            return True
         except Exception:
-            logger.exception('Error sending email to %s with template %s', to_email, template_name)
+            logger.exception('Error building email to %s with template %s', to_email, template_name)
             return False
+        if getattr(settings, 'EMAIL_SEND_IN_BACKGROUND', False):
+            _email_executor.submit(_deliver, email, to_email, template_name)
+            return True
+        return _deliver(email, to_email, template_name)
 
     @classmethod
     def send_due_reminder(cls, user: User, bills: list, missing_recurring: list) -> bool:
