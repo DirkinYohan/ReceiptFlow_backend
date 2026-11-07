@@ -1,4 +1,5 @@
 -r production.txt
+-r development.txt
 
 pytest>=9.0
 pytest-django>=4.9
