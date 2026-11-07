@@ -3,14 +3,11 @@ from __future__ import annotations
 import logging
 import os
 from time import perf_counter
-from typing import Optional
 
 from celery import Task, shared_task
-from celery.exceptions import SoftTimeLimitExceeded, Ignore
+from celery.exceptions import SoftTimeLimitExceeded
 from django.conf import settings
 from django.core.cache import cache
-from django.db import transaction
-from django.db.models import Q
 from django.utils import timezone
 
 from .models import Document
@@ -32,7 +29,7 @@ def _release_processing_lock(document_id) -> None:
     try:
         cache.delete(key)
     except Exception:
-        pass
+        logger.warning('Could not release processing lock for document %s', document_id, exc_info=True)
 
 
 def _is_duplicate_task(document_id) -> bool:
@@ -204,7 +201,6 @@ def cleanup_old_token_blacklist(days: int = 30):
         )
         cutoff = timezone.now() - timezone.timedelta(days=max(int(days), 1))
         bl_qs = BlacklistedToken.objects.filter(token__expires_at__lt=cutoff)
-        bl_count = bl_qs._result_cache if False else 0
         deleted_blacklist, _ = bl_qs.delete()
         out_qs = OutstandingToken.objects.filter(expires_at__lt=cutoff)
         deleted_outstanding, _ = out_qs.delete()
@@ -248,8 +244,6 @@ def cleanup_old_failed_documents(days: int = 30):
 @shared_task(name='apps.documents.tasks.cleanup_expired_password_reset_tokens', ignore_result=True)
 def cleanup_expired_password_reset_tokens():
     try:
-        from django.contrib.auth.tokens import default_token_generator
-        from apps.users.models import User
         logger.info('Running auth token maintenance pass (no DB tokens exist; framework uses signed URLs).')
         return {'cleanup': 'signed_tokens_noop'}
     except Exception:

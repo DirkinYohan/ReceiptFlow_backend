@@ -1,10 +1,11 @@
-from django.db.models import Q
 from rest_framework import serializers, status, viewsets
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from apps.common.ownership import categories_for
+
 from .budgets import budget_status
-from .models import Category, CategoryBudget
+from .models import CategoryBudget
 
 
 class CategoryBudgetSerializer(serializers.ModelSerializer):
@@ -24,9 +25,7 @@ class CategoryBudgetSerializer(serializers.ModelSerializer):
         return budget_status(obj)
 
     def validate_category(self, value):
-        user = self.context['request'].user
-        allowed = Category.objects.filter(Q(scope=Category.SCOPE_SYSTEM) | Q(user=user), pk=value.pk)
-        if not allowed.exists():
+        if not categories_for(self.context['request'].user).filter(pk=value.pk).exists():
             raise serializers.ValidationError('Categoría no encontrada.')
         return value
 

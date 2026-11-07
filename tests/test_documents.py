@@ -3,12 +3,9 @@ import io
 import pytest
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.utils import timezone
 from rest_framework import status
 
-from apps.categories.models import Category
 from apps.documents.models import Document
-from apps.suppliers.models import Supplier
 from PIL import Image
 
 User = get_user_model()
@@ -160,3 +157,16 @@ class TestParallelExtraction:
                 patch('services.document_processor.processor.extract_ocr', side_effect=ocr):
             with pytest.raises(RuntimeError, match='ocr unavailable'):
                 DocumentProcessor().process_file('missing.png')
+
+
+@pytest.mark.django_db
+class TestUploadErrorsAreNotLeaked:
+    def test_storage_failure_returns_generic_message(self, auth_client):
+        from unittest.mock import patch
+
+        file_obj = SimpleUploadedFile('fallo.png', _small_png_bytes(), content_type='image/png')
+        with patch('apps.documents.views.document_service.create_document',
+                   side_effect=RuntimeError('secret bucket detail')):
+            response = auth_client.post('/api/v1/documents/', {'file': file_obj}, format='multipart')
+        assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+        assert 'secret bucket detail' not in response.content.decode()

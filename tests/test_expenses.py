@@ -124,3 +124,47 @@ class TestExpenseEndpoints:
         response = auth_client.delete(url)
         assert response.status_code == status.HTTP_200_OK
         assert not Expense.objects.filter(pk=expense.pk).exists()
+
+
+@pytest.mark.django_db
+class TestExpenseOwnership:
+    def _payload(self, **extra):
+        payload = {'description': 'Gasto', 'amount': '10', 'incurred_at': timezone.now().isoformat()}
+        payload.update(extra)
+        return payload
+
+    def test_cannot_use_another_users_supplier(self, auth_client, user2, system_categories):
+        from apps.suppliers.models import Supplier
+        other = Supplier.objects.create(user=user2, name='Proveedor de otro')
+        response = auth_client.post('/api/v1/expenses/', self._payload(
+            category=system_categories[0].pk, supplier=other.pk,
+        ), format='json')
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert not Expense.objects.filter(supplier=other).exists()
+
+    def test_cannot_use_another_users_category(self, auth_client, user2):
+        private = Category.objects.create(user=user2, name='Privada', scope=Category.SCOPE_USER)
+        response = auth_client.post('/api/v1/expenses/', self._payload(category=private.pk), format='json')
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_cannot_link_another_users_document(self, auth_client, user2, system_categories):
+        from apps.documents.models import Document
+        doc = Document.objects.create(user=user2, original_filename='otro.png', file='documents/otro.png')
+        response = auth_client.post('/api/v1/expenses/', self._payload(
+            category=system_categories[0].pk, document=doc.pk,
+        ), format='json')
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_cannot_move_expense_to_another_users_supplier(self, auth_client, expense, user2):
+        from apps.suppliers.models import Supplier
+        other = Supplier.objects.create(user=user2, name='Ajeno')
+        response = auth_client.patch(f'/api/v1/expenses/{expense.pk}/', {'supplier': other.pk}, format='json')
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        expense.refresh_from_db()
+        assert expense.supplier_id != other.pk
+
+    def test_own_supplier_and_system_category_still_work(self, auth_client, supplier, system_categories):
+        response = auth_client.post('/api/v1/expenses/', self._payload(
+            category=system_categories[0].pk, supplier=supplier.pk,
+        ), format='json')
+        assert response.status_code == status.HTTP_201_CREATED

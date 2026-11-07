@@ -1,8 +1,7 @@
 import logging
-import re
 
 from django.conf import settings
-from django.contrib.auth import get_user_model, password_validation
+from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.utils import timezone
@@ -10,8 +9,8 @@ from rest_framework import serializers
 from rest_framework.exceptions import AuthenticationFailed
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
-from .models import User as UserModel
 from .services import email_service
+from .sessions import revoke_refresh_tokens
 
 User = get_user_model()
 
@@ -326,6 +325,7 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
         user.password_reset_token = ''
         user.password_reset_sent_at = None
         user.save(update_fields=['password', 'password_reset_token', 'password_reset_sent_at', 'updated_at'])
+        revoke_refresh_tokens(user)
         return user
 
 

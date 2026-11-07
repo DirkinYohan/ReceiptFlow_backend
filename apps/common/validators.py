@@ -1,8 +1,12 @@
+import logging
+
 from django.core.files.uploadedfile import UploadedFile
 from django.core.exceptions import ValidationError
 from django.conf import settings
 from rest_framework import serializers
 import os
+
+logger = logging.getLogger(__name__)
 
 
 ALLOWED_IMAGE_MIME_MAP = {
@@ -73,8 +77,8 @@ def validate_uploaded_file(
             if hasattr(file_obj, 'seek'):
                 try:
                     file_obj.seek(pos)
-                except Exception:
-                    pass
+                except (OSError, ValueError):
+                    logger.warning('Could not rewind uploaded file %s', getattr(file_obj, 'name', ''))
 
         if header:
             is_valid_magic = False

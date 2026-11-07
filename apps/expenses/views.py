@@ -14,11 +14,11 @@ from apps.categories.budgets import check_budget_alert_safely
 from apps.expenses.automation import learn_supplier_category
 from apps.expenses.exports import build_csv, build_xlsx, export_queryset
 from apps.expenses.recurring import recurring_overview, refresh_supplier_recurrence
+from apps.common.ownership import find_category_for
 from apps.common.pagination import StandardPagination
 from apps.common.queries import count_of
 from apps.documents.models import ExpenseItem as DocumentExpenseItem
 from apps.common.permissions import IsOwnerOrAdmin
-from apps.documents.models import Document
 
 from .models import Expense
 from .serializers import (
@@ -26,7 +26,6 @@ from .serializers import (
     ExpenseDetailSerializer,
     ExpenseFilter,
     ExpenseSerializer,
-    ExpenseStatsSerializer,
 )
 from .services import expense_service
 
@@ -156,16 +155,7 @@ class ExpenseViewSet(viewsets.ModelViewSet):
             'payment_method': data.get('payment_method', ''),
             'notes': data.get('notes', ''),
         }
-        from apps.categories.models import Category
-        if overrides['category'] is not None:
-            try:
-                overrides['category'] = Category.objects.filter(
-                    pk=overrides['category'],
-                ).filter(
-                    Q(scope=Category.SCOPE_SYSTEM) | Q(user=request.user)
-                ).first()
-            except Exception:
-                overrides['category'] = None
+        overrides['category'] = find_category_for(request.user, overrides['category'])
         try:
             expense = expense_service.create_from_document(
                 request.user, data['document_id'], **overrides,

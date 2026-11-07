@@ -1,11 +1,14 @@
+import logging
+
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.utils.decorators import method_decorator
 from django.views.decorators.debug import sensitive_post_parameters
-from rest_framework import generics, status, views, viewsets
+from rest_framework import generics, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
+from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenRefreshView
 
@@ -33,6 +36,7 @@ from .serializers import (
 )
 
 User = get_user_model()
+logger = logging.getLogger(__name__)
 
 
 sensitive = method_decorator(
@@ -113,8 +117,8 @@ class LogoutView(generics.GenericAPIView):
         try:
             token = RefreshToken(serializer.validated_data['refresh'])
             token.blacklist()
-        except Exception:
-            pass
+        except TokenError:
+            logger.info('Logout with an already invalid refresh token')
         return Response(
             {'status': 'success', 'message': 'Sesión cerrada correctamente.'},
             status=status.HTTP_200_OK,
@@ -149,7 +153,7 @@ class MeView(generics.RetrieveUpdateAPIView):
             try:
                 user.touch_activity()
             except Exception:
-                pass
+                logger.warning('Could not record activity for user %s', user.pk, exc_info=True)
         return user
 
     def retrieve(self, request, *args, **kwargs):

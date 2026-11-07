@@ -2,11 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from typing import Optional
 
 from django.core.files.uploadedfile import UploadedFile
 from django.db import transaction
-from django.utils import timezone
 
 from .models import Document, ExpenseItem
 
@@ -26,8 +24,8 @@ def compute_file_sha256(uploaded_file: UploadedFile, chunk_size: int = 65536) ->
     finally:
         try:
             uploaded_file.seek(pos)
-        except Exception:
-            pass
+        except (OSError, ValueError):
+            logger.warning('Could not rewind uploaded file %s', getattr(uploaded_file, 'name', ''))
     return sha.hexdigest()
 
 

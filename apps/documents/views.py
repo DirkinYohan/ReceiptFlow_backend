@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import logging
-from time import perf_counter
 
 from django.db import transaction
 from django.db.models import Count, OuterRef, Q, Subquery, Sum
 from django_filters import rest_framework as filters
-from rest_framework import mixins, status, viewsets
+from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -14,6 +13,7 @@ from rest_framework.response import Response
 from apps.expenses.automation import learn_supplier_category, sync_expense_safely
 from apps.documents.payables import payables_overview
 from apps.documents.review_messages import humanize_all, language_from
+from apps.common.ownership import find_category_for
 from apps.common.pagination import StandardPagination
 from apps.common.permissions import IsOwnerOrAdmin
 from apps.common.ratelimit import (
@@ -156,7 +156,7 @@ class DocumentViewSet(viewsets.ModelViewSet):
                 request.user.pk, getattr(exc, 'response', None),
             )
             return Response(
-                {'status': 'error', 'message': f'Error al subir el documento: {exc}'},
+                {'status': 'error', 'message': 'No se pudo subir el documento. Inténtalo de nuevo en unos minutos.'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
@@ -198,7 +198,7 @@ class DocumentViewSet(viewsets.ModelViewSet):
         )
 
     def update(self, request, *args, **kwargs):
-        partial = kwargs.pop('partial', False)
+        kwargs.pop('partial', None)
         instance = self.get_object()
         if instance.status == Document.STATUS_PROCESSING:
             return Response(
@@ -234,10 +234,10 @@ class DocumentViewSet(viewsets.ModelViewSet):
         instance = self.get_object()
         try:
             document_service.delete_document_safe(instance)
-        except Exception as exc:
+        except Exception:
             logger.exception('Error deleting document %s', instance.pk)
             return Response(
-                {'status': 'error', 'message': f'Error al eliminar el documento: {exc}'},
+                {'status': 'error', 'message': 'No se pudo eliminar el documento. Inténtalo de nuevo.'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
         return Response(
@@ -275,58 +275,13 @@ class DocumentViewSet(viewsets.ModelViewSet):
                 },
                 status=status.HTTP_429_TOO_MANY_REQUESTS,
             )
-        try:
-            from .tasks import process_document_task
-        except Exception as imp_exc:
-            logger.warning('Celery tasks not importable, falling back to sync pipeline: %s', imp_exc)
-            process_document_task = None
-
-        if process_document_task is None:
-            try:
-                from services.document_processor.processor import process_document_pipeline
-            except Exception:
-                process_document_pipeline = None
-            if process_document_pipeline is None:
-                document.mark_failed('Pipeline de procesamiento no disponible.')
-                return Response(
-                    {'status': 'error', 'message': 'Servicio de OCR no disponible.'},
-                    status=status.HTTP_503_SERVICE_UNAVAILABLE,
-                )
-            document.mark_processing()
-            t0 = perf_counter()
-            try:
-                result = process_document_pipeline(document)
-                processing_ms = (perf_counter() - t0) * 1000
-                if result.get('requires_review'):
-                    document.mark_review_required(result.get('warning', ''))
-                else:
-                    document.mark_completed(processing_time_ms=int(processing_ms))
-                    sync_expense_safely(document)
-            except Exception as exc:
-                logger.exception('Sync processing failed for document %s', document.pk)
-                document.mark_failed(str(exc)[:500])
-                return Response(
-                    {'status': 'error', 'message': 'Error durante el procesamiento.', 'errors': [str(exc)]},
-                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                )
-            return Response(
-                {
-                    'status': 'success',
-                    'message': 'Documento procesado.',
-                    'data': DocumentDetailSerializer(
-                        self._fresh(document), context={'request': request}
-                    ).data,
-                },
-                status=status.HTTP_200_OK,
-            )
-
         document.mark_processing()
         try:
             from .background import schedule_document_processing
             task_result = schedule_document_processing(document.pk)
-        except Exception as exc:
+        except Exception:
             logger.exception('Failed to enqueue process_document_task for %s', document.pk)
-            document.mark_failed(f'No se pudo encolar la tarea: {exc}')
+            document.mark_failed('No se pudo programar el procesamiento.')
             return Response(
                 {'status': 'error', 'message': 'No se pudo programar el procesamiento.'},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -420,20 +375,13 @@ class DocumentViewSet(viewsets.ModelViewSet):
             if cid is None:
                 document.category = None
             else:
-                from apps.categories.models import Category
-                try:
-                    cat = Category.objects.filter(
-                        Q(pk=cid),
-                        Q(scope=Category.SCOPE_SYSTEM) | Q(user=request.user),
-                    ).first()
-                    if not cat:
-                        raise Category.DoesNotExist
-                    document.category = cat
-                except Category.DoesNotExist:
+                category = find_category_for(request.user, cid)
+                if category is None:
                     return Response(
                         {'status': 'error', 'message': 'Categoría no encontrada.'},
                         status=status.HTTP_404_NOT_FOUND,
                     )
+                document.category = category
         for field, value in data.items():
             setattr(document, field, value)
         if status_value:

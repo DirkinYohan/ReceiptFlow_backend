@@ -2,7 +2,6 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.core import mail
 from django.test import override_settings
-from django.urls import reverse
 from rest_framework import status
 
 User = get_user_model()
@@ -287,3 +286,18 @@ class TestChangePassword:
         user.refresh_from_db()
         assert user.check_password(new_password)
         assert not user.check_password(user_password)
+
+
+@pytest.mark.django_db
+class TestSessionsAfterPasswordReset:
+    def test_reset_closes_open_sessions(self, api_client, user, user_password):
+        login = api_client.post('/api/auth/login/', {'email': user.email, 'password': user_password}, format='json')
+        refresh = login.json()['tokens']['refresh']
+        token = user.regenerate_password_reset_token()
+        new_password = 'Nuev4Clave!Segura'
+        api_client.post('/api/auth/password-reset/confirm/', {
+            'email': user.email, 'token': token,
+            'new_password': new_password, 'confirm_password': new_password,
+        }, format='json')
+        response = api_client.post('/api/auth/refresh/', {'refresh': refresh}, format='json')
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED

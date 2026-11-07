@@ -1,7 +1,7 @@
-from django.db.models import Count, Sum
 from django_filters import rest_framework as filters
 from rest_framework import serializers
 
+from apps.common.ownership import categories_for, documents_for, suppliers_for
 from apps.documents.serializers import ExpenseItemSerializer
 
 from .models import Expense
@@ -78,6 +78,16 @@ class ExpenseSerializer(serializers.ModelSerializer):
             'incurred_at': {'required': True},
             'category': {'required': True},
         }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        request = self.context.get('request')
+        user = getattr(request, 'user', None)
+        if user is None or not user.is_authenticated:
+            return
+        self.fields['category'].queryset = categories_for(user)
+        self.fields['supplier'].queryset = suppliers_for(user)
+        self.fields['document'].queryset = documents_for(user)
 
 
 class ExpenseDetailSerializer(ExpenseSerializer):
