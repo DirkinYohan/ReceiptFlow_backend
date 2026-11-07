@@ -11,6 +11,11 @@ jobs:
     env:
       DJANGO_SECRET_KEY: ci-only-secret-key
       DJANGO_DEBUG: "False"
+      DB_NAME: ci
+      DB_USER: ci
+      DB_PASSWORD: ci
+      DB_HOST: localhost
+      DB_PORT: "5432"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
