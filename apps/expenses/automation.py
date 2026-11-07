@@ -13,6 +13,8 @@ from apps.categories.models import Category
 from apps.documents.models import Document
 from apps.expenses.models import Expense
 from apps.expenses.recurring import refresh_supplier_recurrence
+from apps.expenses.services import expense_service
+from services.document_processor.text_parsing import _guess_category_enhanced
 
 logger = logging.getLogger(__name__)
 
@@ -94,8 +96,6 @@ def _expense_values(document: Document) -> dict:
 
 
 def _guess_from_ocr(document: Document) -> Optional[str]:
-    from services.document_processor.text_parsing import _guess_category_enhanced
-
     raw = document.raw_ocr_data or {}
     lines = [str(line) for line in (raw.get('ocr_lines') or [])][:80]
     supplier_name = document.supplier.name if document.supplier else None
@@ -119,7 +119,6 @@ def sync_expense_from_document(document: Document, user_confirmed: bool = False)
     with transaction.atomic():
         expense = document.expenses.select_for_update().first()
         if expense is None:
-            from apps.expenses.services import expense_service
             expense = expense_service.create_from_document(document.user, document.pk, **values)
         else:
             for field, value in values.items():

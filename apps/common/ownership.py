@@ -2,22 +2,20 @@ from __future__ import annotations
 
 from django.db.models import Q, QuerySet
 
+from apps.categories.models import Category
+from apps.documents.models import Document
+from apps.suppliers.models import Supplier
+
 
 def categories_for(user) -> QuerySet:
-    from apps.categories.models import Category
-
     return Category.objects.filter(Q(scope=Category.SCOPE_SYSTEM) | Q(user=user))
 
 
 def suppliers_for(user) -> QuerySet:
-    from apps.suppliers.models import Supplier
-
     return Supplier.objects.filter(user=user)
 
 
 def documents_for(user) -> QuerySet:
-    from apps.documents.models import Document
-
     return Document.objects.filter(user=user)
 
 

@@ -10,6 +10,7 @@ from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 from apps.expenses.models import Expense
+from apps.users.services import EmailService
 
 from .models import CategoryBudget
 
@@ -85,7 +86,6 @@ def check_budget_alert(user, category, day: Optional[date] = None) -> Optional[s
         budget.warning_sent_for = start
     else:
         return None
-    from apps.users.services import EmailService
     EmailService.send_budget_alert(user, budget, status)
     budget.save(update_fields=['warning_sent_for', 'exceeded_sent_for', 'updated_at'])
     return state

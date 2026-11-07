@@ -6,16 +6,12 @@ from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
+from apps.documents.tasks import cleanup_old_token_blacklist, mark_stuck_processing_documents, send_due_reminders
+
 logger = logging.getLogger(__name__)
 
 
 def run_scheduled_tasks() -> dict:
-    from apps.documents.tasks import (
-        cleanup_old_token_blacklist,
-        mark_stuck_processing_documents,
-        send_due_reminders,
-    )
-
     results = {}
     for name, task in (
         ('stuck_documents', mark_stuck_processing_documents),

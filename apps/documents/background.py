@@ -7,6 +7,8 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from django.conf import settings
 from django.db import connections
 
+from .tasks import process_document_task
+
 logger = logging.getLogger(__name__)
 
 _executor: ThreadPoolExecutor | None = None
@@ -25,8 +27,6 @@ def _get_executor() -> ThreadPoolExecutor:
 
 
 def _process_in_thread(document_id: int) -> None:
-    from .tasks import process_document_task
-
     try:
         process_document_task.apply(kwargs={'document_id': document_id})
     except Exception:
@@ -39,6 +39,5 @@ def schedule_document_processing(document_id: int):
     if getattr(settings, 'DOCUMENT_BACKGROUND_THREADS', False):
         future: Future = _get_executor().submit(_process_in_thread, document_id)
         return future
-    from .tasks import process_document_task
 
     return process_document_task.delay(document_id=document_id)

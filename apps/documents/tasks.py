@@ -10,6 +10,12 @@ from django.conf import settings
 from django.core.cache import cache
 from django.utils import timezone
 
+from apps.documents.payables import documents_needing_reminder, due_state
+from apps.expenses.automation import sync_expense_safely
+from apps.expenses.recurring import recurring_overview
+from apps.users.services import EmailService
+from services.document_processor import processor
+
 from .models import Document
 
 logger = logging.getLogger(__name__)
@@ -114,8 +120,7 @@ def process_document_task(self, document_id: int):
 
     t0 = perf_counter()
     try:
-        from services.document_processor.processor import process_document_pipeline
-        result = process_document_pipeline(document)
+        result = processor.process_document_pipeline(document)
         processing_ms = (perf_counter() - t0) * 1000
         requires_review = bool(result.get('requires_review'))
         if requires_review:
@@ -123,7 +128,6 @@ def process_document_task(self, document_id: int):
             document.mark_review_required(reasons)
         else:
             document.mark_completed(processing_time_ms=int(processing_ms))
-            from apps.expenses.automation import sync_expense_safely
             expense = sync_expense_safely(document)
             if expense is not None:
                 logger.info('Document %s auto-registered as expense %s', document_id, expense.pk)
@@ -197,7 +201,8 @@ def mark_stuck_processing_documents(hours: int = 1):
 def cleanup_old_token_blacklist(days: int = 30):
     try:
         from rest_framework_simplejwt.token_blacklist.models import (
-            OutstandingToken, BlacklistedToken,
+            BlacklistedToken,
+            OutstandingToken,
         )
         cutoff = timezone.now() - timezone.timedelta(days=max(int(days), 1))
         bl_qs = BlacklistedToken.objects.filter(token__expires_at__lt=cutoff)
@@ -315,9 +320,6 @@ def cleanup_temporary_processing_files(hours_old: int = 12):
 def send_due_reminders():
     from django.contrib.auth import get_user_model
 
-    from apps.documents.payables import documents_needing_reminder, due_state
-    from apps.expenses.recurring import recurring_overview
-    from apps.users.services import EmailService
 
     today = timezone.localdate()
     users = get_user_model().objects.filter(

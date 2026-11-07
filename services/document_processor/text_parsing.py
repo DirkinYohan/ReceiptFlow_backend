@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import re
 import unicodedata
-from datetime import datetime, date, time
+from datetime import date, datetime, time
 from decimal import Decimal, InvalidOperation
 from typing import Optional, Tuple
 
@@ -11,7 +11,7 @@ from django.conf import settings
 from django.utils import timezone as dj_timezone
 
 from apps.documents.models import Document
-
+from services.money import parse_decimal
 from services.money import parse_decimal as _parse_decimal
 
 logger = logging.getLogger(__name__)
@@ -500,8 +500,6 @@ def _parse_products_and_line_items(lines: list, text: str, currency: str = 'COP'
 
 
 def _settled_charges(sections) -> Optional[Decimal]:
-    from services.money import parse_decimal
-
     charges = Decimal('0')
     payments = Decimal('0')
     for section in sections or []:
