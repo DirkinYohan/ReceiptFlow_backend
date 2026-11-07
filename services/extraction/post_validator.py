@@ -32,7 +32,7 @@ def _is_date(iso: Optional[str]) -> bool:
     try:
         _date.fromisoformat(iso)
         return True
-    except Exception:
+    except (TypeError, ValueError):
         return False
 
 
@@ -549,8 +549,47 @@ def _parse_iso(value: Optional[str]) -> Optional[_date]:
         return None
     try:
         return _date.fromisoformat(value)
-    except Exception:
+    except (TypeError, ValueError):
         return None
+
+
+def _suspicious_invoice_number_reason(doc: ExtractedDocument, invoice_text: str) -> str:
+    invoice_digits = re.sub(r'\D', '', invoice_text)
+    tax_digits = re.sub(r'\D', '', doc.supplier_tax_id or '')
+    verification = doc.supplier_tax_id_verification_digit or ''
+    tax_variants = {tax_digits}
+    if verification.isdigit():
+        tax_variants.add(tax_digits + verification)
+    if tax_digits and invoice_digits in tax_variants:
+        return "invoice_number matches supplier_tax_id or supplier_tax_id+DV"
+    if doc.cufe and invoice_text.lower() == doc.cufe.strip().lower():
+        return "invoice_number matches CUFE"
+    if re.fullmatch(r'[0-9a-fA-F]{48,}', invoice_text):
+        return "invoice_number looks like a CUFE/CUDE"
+    if _looks_like_date(invoice_text):
+        return f"invoice_number={invoice_text!r} looks like a date"
+    if re.match(r'^\s*(nit|cufe|cude)\b', invoice_text, flags=re.IGNORECASE):
+        return "invoice_number is labeled as NIT or CUFE"
+    return ""
+
+
+def _filter_line_items(line_items, warn) -> tuple:
+    kept: List[LineItem] = []
+    removed = 0
+    for idx, item in enumerate(line_items, start=1):
+        if item.quantity is not None and item.quantity <= 0:
+            warn("LINE_ITEM_COHERENCE", f"item #{idx} quantity <=0 ({item.quantity})")
+        if item.unit_price is not None and item.unit_price < 0:
+            warn("LINE_ITEM_COHERENCE", f"item #{idx} unit_price <0 ({item.unit_price})")
+        if item.total is not None and item.total < 0:
+            warn("LINE_ITEM_COHERENCE", f"item #{idx} total <0 ({item.total})")
+        if _is_faux_description(item.description):
+            removed += 1
+            warn("FAUX_LINE_ITEMS_DETECTED",
+                 f"item #{idx} description {item.description!r} is not a product or service")
+            continue
+        kept.append(item)
+    return kept, removed
 
 
 def validate_extracted(doc: ExtractedDocument, raw_text_hint: Optional[str] = None) -> ExtractedDocument:
@@ -601,23 +640,7 @@ def validate_extracted(doc: ExtractedDocument, raw_text_hint: Optional[str] = No
     if doc.currency is not None and doc.currency not in VALID_CURRENCIES:
         _warn("CURRENCY_NOT_ALLOWED", f"currency={doc.currency!r}")
 
-    kept: List[LineItem] = []
-    removed = 0
-    for idx, item in enumerate(doc.line_items, start=1):
-        if item.quantity is not None and item.quantity <= 0:
-            _warn("LINE_ITEM_COHERENCE", f"item #{idx} quantity <=0 ({item.quantity})")
-        if item.unit_price is not None and item.unit_price < 0:
-            _warn("LINE_ITEM_COHERENCE", f"item #{idx} unit_price <0 ({item.unit_price})")
-        if item.total is not None and item.total < 0:
-            _warn("LINE_ITEM_COHERENCE", f"item #{idx} total <0 ({item.total})")
-        if _is_faux_description(item.description):
-            removed += 1
-            _warn("FAUX_LINE_ITEMS_DETECTED",
-                  f"item #{idx} description {item.description!r} is not a product or service")
-            continue
-        kept.append(item)
-
-    items = kept
+    items, removed = _filter_line_items(doc.line_items, _warn)
     if removed and not items:
         _warn("FAUX_LINE_ITEMS_STRIPPED", "line_items were not real products; replaced with []")
     elif removed:
@@ -691,31 +714,8 @@ def validate_extracted(doc: ExtractedDocument, raw_text_hint: Optional[str] = No
 
     invoice_number = doc.invoice_number
     if invoice_number is not None:
-        invoice_text = str(invoice_number).strip()
-        invoice_digits = re.sub(r'\D', '', invoice_text)
-        tax_digits = re.sub(r'\D', '', doc.supplier_tax_id or '')
-        verification = doc.supplier_tax_id_verification_digit or ''
-        tax_variants = {tax_digits}
-        if verification.isdigit():
-            tax_variants.add(tax_digits + verification)
-        suspicious = False
-        reason = ""
-        if tax_digits and invoice_digits in tax_variants:
-            suspicious = True
-            reason = "invoice_number matches supplier_tax_id or supplier_tax_id+DV"
-        elif doc.cufe and invoice_text.lower() == doc.cufe.strip().lower():
-            suspicious = True
-            reason = "invoice_number matches CUFE"
-        elif re.fullmatch(r'[0-9a-fA-F]{48,}', invoice_text):
-            suspicious = True
-            reason = "invoice_number looks like a CUFE/CUDE"
-        elif _looks_like_date(invoice_text):
-            suspicious = True
-            reason = f"invoice_number={invoice_text!r} looks like a date"
-        elif re.match(r'^\s*(nit|cufe|cude)\b', invoice_text, flags=re.IGNORECASE):
-            suspicious = True
-            reason = "invoice_number is labeled as NIT or CUFE"
-        if suspicious:
+        reason = _suspicious_invoice_number_reason(doc, str(invoice_number).strip())
+        if reason:
             invoice_number = None
             _warn("INVOICE_NUMBER_SUSPICIOUS", f"{reason}; cleared")
 

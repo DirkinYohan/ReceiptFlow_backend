@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from django.db.models import Count, OuterRef, Q, Subquery, Sum
 from django_filters import rest_framework as filters
@@ -10,21 +11,22 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from apps.expenses.automation import learn_supplier_category, sync_expense_safely
-from apps.documents.payables import payables_overview
-from apps.documents.review_messages import humanize_all, language_from
 from apps.common.ownership import find_category_for
 from apps.common.pagination import StandardPagination
 from apps.common.permissions import IsOwnerOrAdmin
+from apps.common.queries import count_of
 from apps.common.ratelimit import (
     ratelimit_documents_create,
     ratelimit_documents_process,
 )
 from apps.common.validators import validate_uploaded_file
-
-from apps.common.queries import count_of
+from apps.documents.payables import payables_overview
+from apps.documents.review_messages import humanize_all, language_from
+from apps.expenses.automation import learn_supplier_category, sync_expense_safely
 from apps.expenses.models import Expense
+from apps.suppliers.models import Supplier
 
+from .background import schedule_document_processing
 from .models import Document, ExpenseItem
 from .serializers import (
     DocumentCreateSerializer,
@@ -132,10 +134,18 @@ class DocumentViewSet(viewsets.ModelViewSet):
             )
         try:
             validate_uploaded_file(file_obj)
-        except Exception as exc:
-            messages = getattr(exc, 'messages', None)
-            if messages is None:
-                messages = [str(exc)]
+        except DjangoValidationError as exc:
+            return Response(
+                {
+                    'status': 'error',
+                    'message': 'El archivo no cumple los requisitos.',
+                    'errors': [{'field': 'file', 'message': str(msg)} for msg in exc.messages],
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except Exception:
+            logger.exception('Could not validate uploaded file for user %s', request.user.pk)
+            messages = ['No se pudo leer el archivo.']
             return Response(
                 {
                     'status': 'error',
@@ -161,7 +171,6 @@ class DocumentViewSet(viewsets.ModelViewSet):
             )
 
         try:
-            from .background import schedule_document_processing
             transaction.on_commit(lambda: schedule_document_processing(document.pk))
         except Exception as exc:
             logger.warning('Could not enqueue async processing task for %s: %s', document.pk, exc)
@@ -277,7 +286,6 @@ class DocumentViewSet(viewsets.ModelViewSet):
             )
         document.mark_processing()
         try:
-            from .background import schedule_document_processing
             task_result = schedule_document_processing(document.pk)
         except Exception:
             logger.exception('Failed to enqueue process_document_task for %s', document.pk)
@@ -355,7 +363,6 @@ class DocumentViewSet(viewsets.ModelViewSet):
             if sid is None:
                 document.supplier = None
             else:
-                from apps.suppliers.models import Supplier
                 try:
                     document.supplier = Supplier.objects.get(pk=sid, user=request.user)
                 except Supplier.DoesNotExist:
@@ -365,7 +372,6 @@ class DocumentViewSet(viewsets.ModelViewSet):
                     )
         supplier_name = (data.pop('supplier_name', '') or '').strip()
         if supplier_name and 'supplier_id' not in data:
-            from apps.suppliers.models import Supplier
             document.supplier, _ = Supplier.objects.get_or_create_for_user(
                 user=request.user, name=supplier_name,
             )

@@ -122,7 +122,7 @@ class GeminiOCRService(BaseOCRService):
         cleaned = _clean_json_text(response_text)
         try:
             parsed = json.loads(cleaned)
-        except Exception as json_err:
+        except (TypeError, ValueError) as json_err:
             logger.warning('Failed to parse Gemini response as JSON: %s. Using raw response text.', json_err)
             parsed = {}
 

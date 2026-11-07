@@ -5,21 +5,21 @@ import os
 import re
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field, asdict
-from datetime import datetime, date, time
+from dataclasses import asdict, dataclass, field
+from datetime import date, datetime, time
 from decimal import Decimal
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, Tuple
 
 from django.conf import settings
 from django.db import transaction
 from django.utils import timezone as dj_timezone
 
-from apps.suppliers.models import Supplier
+from apps.documents.duplicates import find_logical_duplicate
 from apps.documents.models import Document
+from apps.documents.payables import apply_payment_inference
 from apps.documents.services import document_service
-
-from services.money import parse_decimal as _parse_decimal
-from services.ocr import extract_ocr, OCRResult
+from apps.expenses.automation import resolve_category
+from apps.suppliers.models import Supplier
 from services.document_processor.text_parsing import (
     _find_colombian_nit,
     _find_cufe,
@@ -36,6 +36,10 @@ from services.document_processor.text_parsing import (
     _parse_products_and_line_items,
     _settled_charges,
 )
+from services.extraction.business_rules import is_critical
+from services.extraction.post_validator import structured_extraction_failed
+from services.money import parse_decimal as _parse_decimal
+from services.ocr import OCRResult, extract_ocr
 
 if TYPE_CHECKING:
     from services.extraction.schemas import ExtractedDocument
@@ -142,11 +146,215 @@ class ProcessedDocument:
 def _aware_from_iso_date(value: str) -> Optional[datetime]:
     try:
         parsed = datetime.fromisoformat(value)
-    except Exception:
+    except (TypeError, ValueError):
         return None
     if settings.USE_TZ and parsed.tzinfo is None:
         return dj_timezone.make_aware(parsed, dj_timezone.get_current_timezone())
     return parsed
+
+
+def _sum_taxes(taxes) -> Tuple[Decimal, Optional[Decimal]]:
+    tax_total = Decimal('0')
+    iva_total = None
+    for tax in taxes:
+        if tax.amount is None:
+            continue
+        tax_total += tax.amount
+        if (tax.type or '').upper() in ('IVA', 'I.V.A.', 'IVA 19%', 'IVA 5%', 'IVA 0%'):
+            iva_total = (iva_total or Decimal('0')) + tax.amount
+    return tax_total, iva_total
+
+
+def _map_structured_line_items(line_items) -> Tuple[list, Decimal, bool]:
+    discount_total = Decimal('0')
+    saw_discount = False
+    mapped = []
+    for idx, item in enumerate(line_items, start=1):
+        description = (item.description or '').strip()[:500]
+        if not description:
+            continue
+        if item.discount is not None:
+            saw_discount = True
+            discount_total += item.discount
+        extra = {'source': 'gemini_structured'}
+        if item.quantity is None:
+            extra['quantity_missing'] = True
+        if item.unit_price is None:
+            extra['unit_price_missing'] = True
+        if item.total is None:
+            extra['total_missing'] = True
+        mapped.append({
+            'sequence': idx,
+            'sku': item.sku or '',
+            'description': description,
+            'quantity': item.quantity,
+            'unit_price': item.unit_price,
+            'tax_rate': item.tax_rate,
+            'tax_amount': item.tax_amount,
+            'discount_amount': item.discount,
+            'total_amount': item.total,
+            'extra': extra,
+        })
+    return mapped, discount_total, saw_discount
+
+
+def _structured_extra_fields(structured: 'ExtractedDocument') -> dict:
+    extra_fields = {}
+    for fname in (
+        'generation_date', 'due_date', 'billing_period', 'billing_period_start',
+        'billing_period_end', 'suspension_date', 'payment_date', 'document_kind',
+        'document_class', 'validation_level', 'other_charges', 'withholdings_amount',
+    ):
+        value = getattr(structured, fname, None)
+        if value is not None:
+            extra_fields[fname] = value
+    if structured.has_product_table is not None:
+        extra_fields['has_product_table'] = structured.has_product_table
+    if structured.service_concepts:
+        extra_fields['service_concepts'] = [
+            {'description': concept.description, 'amount': concept.amount}
+            for concept in structured.service_concepts
+        ]
+    if structured.taxes:
+        extra_fields['taxes'] = [
+            {
+                'type': tax.type,
+                'rate': tax.rate,
+                'taxable_base': tax.taxable_base,
+                'amount': tax.amount,
+            }
+            for tax in structured.taxes
+        ]
+    return extra_fields
+
+
+def _apply_structured_review_rules(processed: ProcessedDocument, structured: 'ExtractedDocument') -> None:
+    processed.warnings = list(structured.warnings)
+    processed.validation_level = structured.validation_level
+    processed.requires_review = bool(structured.requires_review)
+    if processed.total_amount == 0:
+        settled = _settled_charges(processed.sections)
+        if settled:
+            processed.total_amount = settled
+            processed.raw['settled_by_payment'] = True
+            processed.warnings.append(
+                f'SETTLED_BY_PAYMENT: printed balance 0, charges {settled} fully paid'
+            )
+    if not processed.total_amount:
+        processed.requires_review = True
+        processed.validation_level = 'review_required'
+        processed.review_reasons.append(
+            'El total impreso es 0 y no se pudo saber cuánto se pagó.'
+            if processed.total_amount == 0 else 'No se identificó el monto total.'
+        )
+    if not processed.supplier_name:
+        processed.requires_review = True
+        processed.validation_level = 'review_required'
+        processed.review_reasons.append('No se identificó el nombre del proveedor.')
+    if not processed.issued_at:
+        note = 'No se identificó la fecha de emisión.'
+        if note not in processed.warnings:
+            processed.warnings.append(note)
+        if processed.validation_level in (None, 'confirmed'):
+            processed.validation_level = 'completed_with_warnings'
+    if processed.requires_review:
+        for warning in structured.warnings:
+            if is_critical(warning) and warning not in processed.review_reasons:
+                processed.review_reasons.append(warning)
+
+
+def _merge_gemini_fallback(processed: ProcessedDocument, gemini_data, currency: str) -> None:
+    if not processed.supplier_name and gemini_data.get('supplier_name'):
+        processed.supplier_name = str(gemini_data['supplier_name']).strip()
+
+    if not processed.supplier_nit and gemini_data.get('supplier_nit'):
+        nit_clean = re.sub(r'\D', '', str(gemini_data['supplier_nit']))
+        if nit_clean:
+            processed.supplier_nit = nit_clean
+            dv = str(gemini_data.get('supplier_verification_digit') or '')
+            if dv and dv.isdigit():
+                processed.supplier_verification_digit = dv
+                processed.supplier_tax_id = f'{nit_clean}-{dv}'
+            else:
+                processed.supplier_tax_id = nit_clean
+
+    if not processed.cufe and gemini_data.get('cufe'):
+        processed.cufe = str(gemini_data['cufe']).strip()
+
+    if not processed.document_number and gemini_data.get('document_number'):
+        processed.document_number = str(gemini_data['document_number']).strip()
+
+    if not processed.supplier_address and gemini_data.get('supplier_address'):
+        processed.supplier_address = str(gemini_data['supplier_address']).strip()
+
+    if not processed.supplier_phone and gemini_data.get('supplier_phone'):
+        processed.supplier_phone = str(gemini_data['supplier_phone']).strip()
+
+    if not processed.supplier_email and gemini_data.get('supplier_email'):
+        processed.supplier_email = str(gemini_data['supplier_email']).strip().lower()
+
+    if not processed.supplier_website and gemini_data.get('supplier_website'):
+        processed.supplier_website = str(gemini_data['supplier_website']).strip()
+
+    if not processed.issue_date and gemini_data.get('issue_date'):
+        try:
+            parsed_dt = datetime.strptime(str(gemini_data['issue_date']).strip(), '%Y-%m-%d')
+            processed.issue_date = parsed_dt.strftime('%Y-%m-%d')
+            if not processed.issued_at:
+                processed.issued_at = dj_timezone.make_aware(parsed_dt)
+        except ValueError:
+            logger.debug('Ignoring unreadable issue date %r', gemini_data.get('issue_date'))
+
+    if not processed.total_amount and gemini_data.get('total_amount') is not None:
+        processed.total_amount = _parse_decimal(str(gemini_data['total_amount']), default_currency=currency)
+
+    if not processed.subtotal_amount and gemini_data.get('subtotal_amount') is not None:
+        processed.subtotal_amount = _parse_decimal(str(gemini_data['subtotal_amount']), default_currency=currency)
+
+    if not processed.tax_amount and gemini_data.get('tax_amount') is not None:
+        processed.tax_amount = _parse_decimal(str(gemini_data['tax_amount']), default_currency=currency)
+
+    if not processed.iva_amount and gemini_data.get('iva_amount') is not None:
+        processed.iva_amount = _parse_decimal(str(gemini_data['iva_amount']), default_currency=currency)
+
+    if not processed.discount_amount and gemini_data.get('discount_amount') is not None:
+        processed.discount_amount = _parse_decimal(str(gemini_data['discount_amount']), default_currency=currency)
+
+    if not processed.tip_amount and gemini_data.get('tip_amount') is not None:
+        processed.tip_amount = _parse_decimal(str(gemini_data['tip_amount']), default_currency=currency)
+
+    if (not processed.payment_method or processed.payment_method == Document.PAYMENT_METHOD_OTHER) and gemini_data.get('payment_method'):
+        pm = str(gemini_data['payment_method']).lower().strip()
+        if pm in dict(Document.PAYMENT_METHOD_CHOICES):
+            processed.payment_method = pm
+
+    if not processed.line_items and gemini_data.get('line_items') and isinstance(gemini_data['line_items'], list):
+        g_items = []
+        for idx, item in enumerate(gemini_data['line_items'], start=1):
+            if isinstance(item, dict):
+                desc = str(item.get('description', '')).strip()
+                qty = _parse_decimal(str(item.get('quantity', 1))) or Decimal('1.00')
+                u_price = _parse_decimal(str(item.get('unit_price', 0))) or Decimal('0.00')
+                t_amt = _parse_decimal(str(item.get('total_amount', 0))) or (qty * u_price)
+                tax_rt = _parse_decimal(str(item.get('tax_rate', 0)))
+                g_items.append({
+                    'sequence': idx,
+                    'sku': '',
+                    'description': desc,
+                    'quantity': qty,
+                    'unit_price': u_price,
+                    'total_amount': t_amt,
+                    'tax_rate': tax_rt,
+                    'tax_amount': None,
+                    'discount_amount': Decimal('0.00'),
+                    'notes': '',
+                    'extra': {'source': 'gemini'},
+                })
+        if g_items:
+            processed.line_items = g_items
+
+    if not processed.category and gemini_data.get('suggested_category'):
+        processed.category = str(gemini_data['suggested_category']).strip()
 
 
 class DocumentProcessor:
@@ -156,7 +364,7 @@ class DocumentProcessor:
     def _process_via_structured(self, file_path: str) -> Optional['ExtractedDocument']:
         try:
             from services.extraction import GeminiStructuredExtractor
-        except Exception as exc:
+        except ImportError as exc:
             logger.info('Structured extraction imports unavailable: %s', exc)
             return None
         if not getattr(settings, 'GEMINI_STRUCTURED_OUTPUT_ENABLED', True):
@@ -216,20 +424,11 @@ class DocumentProcessor:
         if structured.total_amount is not None:
             processed.total_amount = structured.total_amount
         if structured.taxes:
-            from decimal import Decimal as _Dec
-            tax_total = _Dec('0')
-            iva_total = None
-            for t in structured.taxes:
-                if t.amount is not None:
-                    tax_total += t.amount
-                    ttype = (t.type or '').upper() if t.type else ''
-                    if ttype in ('IVA', 'I.V.A.', 'IVA 19%', 'IVA 5%', 'IVA 0%'):
-                        iva_total = (iva_total or _Dec('0')) + t.amount
+            tax_total, iva_total = _sum_taxes(structured.taxes)
             if tax_total > 0:
                 processed.tax_amount = tax_total
             if iva_total is not None:
                 processed.iva_amount = iva_total
-        from services.extraction.post_validator import structured_extraction_failed
         if not structured_extraction_failed(structured):
             mapped = []
             from decimal import Decimal as _Dec2
@@ -276,8 +475,6 @@ class DocumentProcessor:
         ocr_result: Optional[OCRResult],
         document_type_hint: str = 'receipt',
     ) -> ProcessedDocument:
-        from decimal import Decimal as _Dec
-
         text = ocr_result.raw_text if ocr_result else ''
         lines = list(ocr_result.lines or []) if ocr_result else []
         processed = ProcessedDocument(
@@ -327,46 +524,9 @@ class DocumentProcessor:
         processed.total_amount = structured.total_amount
 
         if structured.taxes:
-            tax_total = _Dec('0')
-            iva_total = None
-            for tax in structured.taxes:
-                if tax.amount is None:
-                    continue
-                tax_total += tax.amount
-                if (tax.type or '').upper() in ('IVA', 'I.V.A.', 'IVA 19%', 'IVA 5%', 'IVA 0%'):
-                    iva_total = (iva_total or _Dec('0')) + tax.amount
-            processed.tax_amount = tax_total
-            processed.iva_amount = iva_total
+            processed.tax_amount, processed.iva_amount = _sum_taxes(structured.taxes)
 
-        discount_total = _Dec('0')
-        saw_discount = False
-        mapped = []
-        for idx, item in enumerate(structured.line_items, start=1):
-            description = (item.description or '').strip()[:500]
-            if not description:
-                continue
-            if item.discount is not None:
-                saw_discount = True
-                discount_total += item.discount
-            extra = {'source': 'gemini_structured'}
-            if item.quantity is None:
-                extra['quantity_missing'] = True
-            if item.unit_price is None:
-                extra['unit_price_missing'] = True
-            if item.total is None:
-                extra['total_missing'] = True
-            mapped.append({
-                'sequence': idx,
-                'sku': item.sku or '',
-                'description': description,
-                'quantity': item.quantity,
-                'unit_price': item.unit_price,
-                'tax_rate': item.tax_rate,
-                'tax_amount': item.tax_amount,
-                'discount_amount': item.discount,
-                'total_amount': item.total,
-                'extra': extra,
-            })
+        mapped, discount_total, saw_discount = _map_structured_line_items(structured.line_items)
         processed.line_items = mapped
         processed.category = structured.suggested_category or _guess_category_enhanced(
             supplier_name=structured.supplier_name,
@@ -380,74 +540,15 @@ class DocumentProcessor:
         if saw_discount:
             processed.discount_amount = discount_total
 
-        extra_fields = {}
-        for fname in (
-            'generation_date', 'due_date', 'billing_period', 'billing_period_start',
-            'billing_period_end', 'suspension_date', 'payment_date', 'document_kind',
-            'document_class', 'validation_level', 'other_charges', 'withholdings_amount',
-        ):
-            value = getattr(structured, fname, None)
-            if value is not None:
-                extra_fields[fname] = value
-        if structured.has_product_table is not None:
-            extra_fields['has_product_table'] = structured.has_product_table
-        if structured.service_concepts:
-            extra_fields['service_concepts'] = [
-                {'description': concept.description, 'amount': concept.amount}
-                for concept in structured.service_concepts
-            ]
-        if structured.taxes:
-            extra_fields['taxes'] = [
-                {
-                    'type': tax.type,
-                    'rate': tax.rate,
-                    'taxable_base': tax.taxable_base,
-                    'amount': tax.amount,
-                }
-                for tax in structured.taxes
-            ]
+        extra_fields = _structured_extra_fields(structured)
         if extra_fields:
             processed.raw['extracted_extra_fields'] = _json_safe(extra_fields)
 
-        from services.extraction.business_rules import is_critical
-
-        processed.warnings = list(structured.warnings)
-        processed.validation_level = structured.validation_level
-        processed.requires_review = bool(structured.requires_review)
-        if processed.total_amount == 0:
-            settled = _settled_charges(processed.sections)
-            if settled:
-                processed.total_amount = settled
-                processed.raw['settled_by_payment'] = True
-                processed.warnings.append(
-                    f'SETTLED_BY_PAYMENT: printed balance 0, charges {settled} fully paid'
-                )
-        if not processed.total_amount:
-            processed.requires_review = True
-            processed.validation_level = 'review_required'
-            processed.review_reasons.append(
-                'El total impreso es 0 y no se pudo saber cuánto se pagó.'
-                if processed.total_amount == 0 else 'No se identificó el monto total.'
-            )
-        if not processed.supplier_name:
-            processed.requires_review = True
-            processed.validation_level = 'review_required'
-            processed.review_reasons.append('No se identificó el nombre del proveedor.')
-        if not processed.issued_at:
-            note = 'No se identificó la fecha de emisión.'
-            if note not in processed.warnings:
-                processed.warnings.append(note)
-            if processed.validation_level in (None, 'confirmed'):
-                processed.validation_level = 'completed_with_warnings'
-        if processed.requires_review:
-            for warning in structured.warnings:
-                if is_critical(warning) and warning not in processed.review_reasons:
-                    processed.review_reasons.append(warning)
+        _apply_structured_review_rules(processed, structured)
         return processed
 
     def process_file(self, file_path: str, document_type: str = 'receipt',
                      original_filename: str = '') -> ProcessedDocument:
-        from services.extraction.post_validator import structured_extraction_failed
 
         with ThreadPoolExecutor(max_workers=2) as pool:
             structured_future = pool.submit(self._process_via_structured, file_path)
@@ -540,7 +641,7 @@ class DocumentProcessor:
         processed.supplier_name = _find_supplier_name(lines, text)
         processed.supplier_address = _find_supplier_address(lines)
         processed.supplier_phone = _find_supplier_phone(lines, text)
-        
+
         email_matches = re.findall(r'\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b', text)
         if email_matches:
             processed.supplier_email = email_matches[0].lower()
@@ -579,97 +680,7 @@ class DocumentProcessor:
 
         gemini_data = ocr_result.extra.get('gemini_structured') if isinstance(ocr_result.extra, dict) else None
         if gemini_data and isinstance(gemini_data, dict):
-            if not processed.supplier_name and gemini_data.get('supplier_name'):
-                processed.supplier_name = str(gemini_data['supplier_name']).strip()
-            
-            if not processed.supplier_nit and gemini_data.get('supplier_nit'):
-                nit_clean = re.sub(r'\D', '', str(gemini_data['supplier_nit']))
-                if nit_clean:
-                    processed.supplier_nit = nit_clean
-                    dv = str(gemini_data.get('supplier_verification_digit') or '')
-                    if dv and dv.isdigit():
-                        processed.supplier_verification_digit = dv
-                        processed.supplier_tax_id = f'{nit_clean}-{dv}'
-                    else:
-                        processed.supplier_tax_id = nit_clean
-            
-            if not processed.cufe and gemini_data.get('cufe'):
-                processed.cufe = str(gemini_data['cufe']).strip()
-                
-            if not processed.document_number and gemini_data.get('document_number'):
-                processed.document_number = str(gemini_data['document_number']).strip()
-                
-            if not processed.supplier_address and gemini_data.get('supplier_address'):
-                processed.supplier_address = str(gemini_data['supplier_address']).strip()
-                
-            if not processed.supplier_phone and gemini_data.get('supplier_phone'):
-                processed.supplier_phone = str(gemini_data['supplier_phone']).strip()
-                
-            if not processed.supplier_email and gemini_data.get('supplier_email'):
-                processed.supplier_email = str(gemini_data['supplier_email']).strip().lower()
-                
-            if not processed.supplier_website and gemini_data.get('supplier_website'):
-                processed.supplier_website = str(gemini_data['supplier_website']).strip()
-                
-            if not processed.issue_date and gemini_data.get('issue_date'):
-                try:
-                    parsed_dt = datetime.strptime(str(gemini_data['issue_date']).strip(), '%Y-%m-%d')
-                    processed.issue_date = parsed_dt.strftime('%Y-%m-%d')
-                    if not processed.issued_at:
-                        processed.issued_at = dj_timezone.make_aware(parsed_dt)
-                except ValueError:
-                    logger.debug('Ignoring unreadable issue date %r', gemini_data.get('issue_date'))
-                    
-            if not processed.total_amount and gemini_data.get('total_amount') is not None:
-                processed.total_amount = _parse_decimal(str(gemini_data['total_amount']), default_currency=currency)
-                
-            if not processed.subtotal_amount and gemini_data.get('subtotal_amount') is not None:
-                processed.subtotal_amount = _parse_decimal(str(gemini_data['subtotal_amount']), default_currency=currency)
-                
-            if not processed.tax_amount and gemini_data.get('tax_amount') is not None:
-                processed.tax_amount = _parse_decimal(str(gemini_data['tax_amount']), default_currency=currency)
-                
-            if not processed.iva_amount and gemini_data.get('iva_amount') is not None:
-                processed.iva_amount = _parse_decimal(str(gemini_data['iva_amount']), default_currency=currency)
-                
-            if not processed.discount_amount and gemini_data.get('discount_amount') is not None:
-                processed.discount_amount = _parse_decimal(str(gemini_data['discount_amount']), default_currency=currency)
-                
-            if not processed.tip_amount and gemini_data.get('tip_amount') is not None:
-                processed.tip_amount = _parse_decimal(str(gemini_data['tip_amount']), default_currency=currency)
-                
-            if (not processed.payment_method or processed.payment_method == Document.PAYMENT_METHOD_OTHER) and gemini_data.get('payment_method'):
-                pm = str(gemini_data['payment_method']).lower().strip()
-                if pm in dict(Document.PAYMENT_METHOD_CHOICES):
-                    processed.payment_method = pm
-                    
-            if not processed.line_items and gemini_data.get('line_items') and isinstance(gemini_data['line_items'], list):
-                g_items = []
-                for idx, item in enumerate(gemini_data['line_items'], start=1):
-                    if isinstance(item, dict):
-                        desc = str(item.get('description', '')).strip()
-                        qty = _parse_decimal(str(item.get('quantity', 1))) or Decimal('1.00')
-                        u_price = _parse_decimal(str(item.get('unit_price', 0))) or Decimal('0.00')
-                        t_amt = _parse_decimal(str(item.get('total_amount', 0))) or (qty * u_price)
-                        tax_rt = _parse_decimal(str(item.get('tax_rate', 0)))
-                        g_items.append({
-                            'sequence': idx,
-                            'sku': '',
-                            'description': desc,
-                            'quantity': qty,
-                            'unit_price': u_price,
-                            'total_amount': t_amt,
-                            'tax_rate': tax_rt,
-                            'tax_amount': None,
-                            'discount_amount': Decimal('0.00'),
-                            'notes': '',
-                            'extra': {'source': 'gemini'},
-                        })
-                if g_items:
-                    processed.line_items = g_items
-                    
-            if not processed.category and gemini_data.get('suggested_category'):
-                processed.category = str(gemini_data['suggested_category']).strip()
+            _merge_gemini_fallback(processed, gemini_data, currency)
 
 
         if not processed.total_amount:
@@ -759,16 +770,7 @@ def _reuse_exact_duplicate(document: Document, user) -> Optional[dict]:
     return None
 
 
-def process_document_pipeline(document: Document) -> dict:
-    if not document.file:
-        raise ValueError('Document has no file attached.')
-
-    user = document.user
-
-    reused = _reuse_exact_duplicate(document, user)
-    if reused is not None:
-        return reused
-
+def _extract_from_file(document: Document) -> ProcessedDocument:
     temp_file = None
     try:
         file_path = document.file.path
@@ -786,8 +788,7 @@ def process_document_pipeline(document: Document) -> dict:
             document.file.close()
 
     try:
-        processor = DocumentProcessor()
-        processed = processor.process_file(
+        return DocumentProcessor().process_file(
             file_path,
             document_type=document.document_type,
             original_filename=document.original_filename or document.file.name,
@@ -799,28 +800,29 @@ def process_document_pipeline(document: Document) -> dict:
             except OSError:
                 logger.warning('Could not delete temporary file %s', temp_file.name)
 
-    supplier = None
-    if processed.supplier_name:
-        try:
-            supplier, _ = Supplier.objects.get_or_create_for_user(
-                user=user,
-                name=processed.supplier_name,
-                tax_id=processed.supplier_tax_id or '',
-                address=processed.supplier_address or '',
-                phone=processed.supplier_phone or '',
-                email=processed.supplier_email or '',
-            )
-        except Exception:
-            supplier = Supplier.objects.find_match(
-                user=user,
-                name=processed.supplier_name,
-                tax_id=processed.supplier_tax_id or '',
-            )
 
-    from apps.expenses.automation import resolve_category
-    category = resolve_category(user, supplier, processed.category)
+def _resolve_supplier(user, processed: ProcessedDocument) -> Optional[Supplier]:
+    if not processed.supplier_name:
+        return None
+    try:
+        supplier, _ = Supplier.objects.get_or_create_for_user(
+            user=user,
+            name=processed.supplier_name,
+            tax_id=processed.supplier_tax_id or '',
+            address=processed.supplier_address or '',
+            phone=processed.supplier_phone or '',
+            email=processed.supplier_email or '',
+        )
+        return supplier
+    except Exception:
+        return Supplier.objects.find_match(
+            user=user,
+            name=processed.supplier_name,
+            tax_id=processed.supplier_tax_id or '',
+        )
 
-    from apps.documents.duplicates import find_logical_duplicate
+
+def _flag_logical_duplicate(document: Document, supplier, processed: ProcessedDocument) -> None:
     logical_dup = find_logical_duplicate(
         document, supplier, processed.document_number, processed.total_amount, processed.issued_at,
     )
@@ -833,9 +835,10 @@ def process_document_pipeline(document: Document) -> dict:
         )
         processed.raw['logical_duplicate_of_id'] = logical_dup.pk
 
+
+def _model_fields_for(processed: ProcessedDocument) -> dict:
     model_fields = processed.to_model_fields()
-    structured_source = processed.raw.get('extraction_source') == 'gemini_structured'
-    if structured_source:
+    if processed.raw.get('extraction_source') == 'gemini_structured':
         model_fields['document_number'] = processed.document_number or ''
         model_fields['issued_at'] = processed.issued_at
         model_fields['due_date'] = processed.due_date
@@ -845,6 +848,11 @@ def process_document_pipeline(document: Document) -> dict:
         model_fields['payment_method'] = processed.payment_method or ''
         if processed.currency:
             model_fields['currency'] = processed.currency
+    return model_fields
+
+
+def _save_processed(document: Document, processed: ProcessedDocument, model_fields: dict, supplier, category) -> None:
+    structured_source = processed.raw.get('extraction_source') == 'gemini_structured'
     with transaction.atomic():
         for field_name, value in model_fields.items():
             setattr(document, field_name, value)
@@ -856,7 +864,6 @@ def process_document_pipeline(document: Document) -> dict:
             document.category = category
         if processed.notes:
             document.notes = processed.notes
-        from apps.documents.payables import apply_payment_inference
         apply_payment_inference(
             document,
             getattr(processed, 'document_class', None),
@@ -870,6 +877,24 @@ def process_document_pipeline(document: Document) -> dict:
 
         if structured_source or processed.line_items:
             document_service.set_line_items(document, processed.line_items)
+
+
+def process_document_pipeline(document: Document) -> dict:
+    if not document.file:
+        raise ValueError('Document has no file attached.')
+
+    user = document.user
+
+    reused = _reuse_exact_duplicate(document, user)
+    if reused is not None:
+        return reused
+
+    processed = _extract_from_file(document)
+    supplier = _resolve_supplier(user, processed)
+    category = resolve_category(user, supplier, processed.category)
+    _flag_logical_duplicate(document, supplier, processed)
+    model_fields = _model_fields_for(processed)
+    _save_processed(document, processed, model_fields, supplier, category)
 
     return {
         'requires_review': processed.requires_review,

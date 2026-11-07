@@ -33,6 +33,7 @@ MESSAGES = {
     'No se pudo programar el procesamiento.': 'The reading could not be scheduled.',
     'No se pudo subir el documento. Inténtalo de nuevo en unos minutos.': 'The document could not be uploaded. Try again in a few minutes.',
     'No se pudo eliminar el documento. Inténtalo de nuevo.': 'The document could not be deleted. Try again.',
+    'No se pudo leer el archivo.': 'The file could not be read.',
     'Documento enviado a procesamiento de forma asíncrona. El estado se actualizará automáticamente cuando finalice.':
         'The document is being read. Its status will update automatically when it finishes.',
     'Ya se está leyendo este documento. Espera unos segundos.': 'This document is already being read. Wait a few seconds.',

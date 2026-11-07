@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 import logging
 import os
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
+
+from pydantic import ValidationError as PydanticValidationError
 from typing import Optional
 
 from django.conf import settings
@@ -385,7 +387,7 @@ def _as_decimal(value) -> Optional[Decimal]:
     if isinstance(value, (int, float)):
         try:
             return Decimal(str(value))
-        except Exception:
+        except (InvalidOperation, TypeError, ValueError):
             return None
     if isinstance(value, str):
         return parse_decimal(value, default_currency='COP')
@@ -460,7 +462,7 @@ class GeminiStructuredExtractor:
     def _try_structured(self, client, model_name: str, file_part) -> Optional[ExtractedDocument]:
         try:
             from google.genai import types  # type: ignore
-        except Exception:
+        except ImportError:
             types = None
 
         kwargs = {
@@ -508,7 +510,7 @@ class GeminiStructuredExtractor:
         cleaned = _clean_json_text(text)
         try:
             data = json.loads(cleaned)
-        except Exception as exc:
+        except (TypeError, ValueError) as exc:
             logger.info('Could not parse Gemini JSON %s: %s', source, exc)
             return None
         if not isinstance(data, dict):
@@ -518,7 +520,7 @@ class GeminiStructuredExtractor:
         model: Optional[ExtractedDocument] = None
         try:
             model = ExtractedDocument.model_validate(data)
-        except Exception as exc:
+        except PydanticValidationError as exc:
             logger.info('Pydantic validation failed for Gemini %s output: %s', source, exc)
             salvaged = dict(data)
             salvaged['line_items'] = []
@@ -526,7 +528,7 @@ class GeminiStructuredExtractor:
             extra_warnings.append(f"GEMINI_SCHEMA_VALIDATION_FAILED: {exc.__class__.__name__}")
             try:
                 model = ExtractedDocument.model_validate(salvaged)
-            except Exception as second_exc:
+            except PydanticValidationError as second_exc:
                 return ExtractedDocument(
                     requires_review=True,
                     warnings=[f"GEMINI_SCHEMA_VALIDATION_FAILED: {second_exc.__class__.__name__}"],

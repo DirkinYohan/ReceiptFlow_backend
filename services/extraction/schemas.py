@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from datetime import date as _date
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Any, List, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -132,7 +132,7 @@ def _to_decimal(value) -> Optional[Decimal]:
         return parse_decimal(value, default_currency='COP')
     try:
         return Decimal(str(value))
-    except Exception:
+    except (InvalidOperation, TypeError, ValueError):
         return None
 
 

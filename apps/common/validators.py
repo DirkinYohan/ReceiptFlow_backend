@@ -57,7 +57,7 @@ def validate_uploaded_file(
                 file_obj.file.seek(0, os.SEEK_END)
                 size = file_obj.file.tell()
                 file_obj.file.seek(0)
-            except Exception:
+            except (AttributeError, OSError, ValueError):
                 size = 0
         else:
             size = 0
