@@ -1,4 +1,3 @@
-from django.db.models import Count, Sum
 from django_filters import rest_framework as filters
 from rest_framework import serializers
 

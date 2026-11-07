@@ -94,7 +94,7 @@ def _expense_values(document: Document) -> dict:
 
 
 def _guess_from_ocr(document: Document) -> Optional[str]:
-    from services.document_processor.processor import _guess_category_enhanced
+    from services.document_processor.text_parsing import _guess_category_enhanced
 
     raw = document.raw_ocr_data or {}
     lines = [str(line) for line in (raw.get('ocr_lines') or [])][:80]

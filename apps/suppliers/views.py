@@ -1,5 +1,4 @@
 from django.db import models as django_models
-from django.db.models import Count
 from django_filters import rest_framework as filters
 from rest_framework import status, viewsets
 from rest_framework.decorators import action

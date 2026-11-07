@@ -1,13 +1,10 @@
 import logging
 from concurrent.futures import ThreadPoolExecutor
-from typing import Optional
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.contrib.auth.tokens import default_token_generator
 from django.core.mail import EmailMultiAlternatives
 from django.template.loader import render_to_string
-from django.utils import timezone
 from django.utils.html import strip_tags
 
 logger = logging.getLogger(__name__)

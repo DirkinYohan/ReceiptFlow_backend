@@ -1,12 +1,9 @@
-from decimal import Decimal
 
 from django.db import transaction
-from django.utils import timezone
 
 from apps.documents.models import Document, ExpenseItem as DocumentExpenseItem
 from apps.suppliers.models import Supplier
 from apps.expenses.models import Expense
-from apps.documents.services import document_service
 
 
 class ExpenseService:

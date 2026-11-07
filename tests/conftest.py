@@ -14,7 +14,6 @@ except Exception:
     pass
 
 from apps.categories.models import Category
-from apps.documents.models import Document, ExpenseItem
 from apps.expenses.models import Expense
 from apps.suppliers.models import Supplier
 from rest_framework.test import APIClient

@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import tempfile
 import time
 from datetime import timedelta
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -13,7 +11,6 @@ from django.utils import timezone
 
 from apps.documents.models import Document
 from apps.documents.tasks import (
-    PROCESSING_LOCK_KEY_TEMPLATE,
     _acquire_processing_lock,
     _release_processing_lock,
     _is_duplicate_task,
@@ -268,7 +265,7 @@ class TestCleanupOldFailedDocuments:
             status=Document.STATUS_FAILED,
             processed_at=timezone.now() - timedelta(days=2),
         )
-        result = cleanup_old_failed_documents.apply(args=[30]).get()
+        cleanup_old_failed_documents.apply(args=[30]).get()
         doc.refresh_from_db()
         assert 'Mantenimiento' not in (doc.notes or '')
 

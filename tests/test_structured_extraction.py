@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -13,7 +13,6 @@ from services.extraction import (
     validate_extracted,
 )
 from services.extraction.post_validator import (
-    PRODUCT_TABLE_KEYWORDS,
     _looks_like_date,
 )
 
@@ -370,10 +369,6 @@ class TestFacturasTipificadas:
         assert 'FAUX_LINE_ITEMS_DETECTED' in codes
         assert 'FAUX_LINE_ITEMS_STRIPPED' in codes
         assert len(v.line_items) == 0
-        for it in doc.line_items:
-            d = (it.description or '').lower()
-            for bad in ('lectura', 'periodo', 'consumo', 'histórico', 'histórico'):
-                assert True
         assert v.line_items == []
         assert v.subtotal == Decimal('92000.00')
         assert v.total_amount == Decimal('124300.00')
@@ -574,7 +569,6 @@ class TestProcessorIntegration:
             warnings=[],
             requires_review=False,
         )
-        from services.document_processor.processor import ProcessedDocument
         pd = ProcessedDocument()
         pd = processor._apply_structured_to_processed(pd, structured)
         assert pd.document_number == 'CJ-001'

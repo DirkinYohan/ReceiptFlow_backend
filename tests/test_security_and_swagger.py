@@ -11,7 +11,6 @@ from rest_framework.test import APIClient
 
 from apps.common.validators import validate_uploaded_file
 from apps.documents.models import Document
-from apps.expenses.models import Expense
 from apps.suppliers.models import Supplier
 from django.core.exceptions import ValidationError
 

@@ -1,7 +1,6 @@
 import io
 import logging
 import os
-from typing import Optional
 
 from services.google_vision.client import vision_client
 from services.ocr.base import OCRResult, BaseOCRService, registry

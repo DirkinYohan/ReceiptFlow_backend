@@ -1,7 +1,6 @@
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 
-import pytest
 from django.core import mail
 from django.utils import timezone
 

@@ -6,7 +6,6 @@ from typing import Optional
 
 from django.conf import settings
 from django.db import models
-from django.db.models import Q
 
 
 class SupplierManager(models.Manager):

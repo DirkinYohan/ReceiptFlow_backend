@@ -1,32 +1,17 @@
 import json
 import logging
 import os
-import re
-from typing import Optional
 
 from django.conf import settings
 
 from services.ocr.base import OCRResult, BaseOCRService, registry
 
+from services.gemini_common import CANDIDATE_MODELS, MIME_TYPE_MAP  # noqa: F401
+from services.gemini_common import clean_json_text as _clean_json_text
+from services.gemini_common import get_mime_type as _get_mime_type
+
 logger = logging.getLogger(__name__)
 
-MIME_TYPE_MAP = {
-    'pdf': 'application/pdf',
-    'png': 'image/png',
-    'jpg': 'image/jpeg',
-    'jpeg': 'image/jpeg',
-    'webp': 'image/webp',
-    'gif': 'image/gif',
-    'bmp': 'image/bmp',
-    'tiff': 'image/tiff',
-    'tif': 'image/tiff',
-}
-
-CANDIDATE_MODELS = [
-    'gemini-3.5-flash',
-    'gemini-3.5-flash-lite',
-    'gemini-3.8-flash',
-]
 
 PROMPT = """Eres el motor de reconocimiento óptico de caracteres (OCR) y análisis documental inteligente de ReceiptFlow.
 Tu misión es analizar la imagen o documento proporcionado (recibo, tirilla POS, factura comercial, factura electrónica o factura de servicios públicos colombiana) y extraer el texto verbatim y los datos que sí aparecen.
@@ -67,20 +52,6 @@ Responde ÚNICAMENTE con un objeto JSON válido (sin explicaciones previas ni bl
 
 Si hay productos, cada elemento de line_items usa: description (string), quantity (número o null), unit_price (número o null), tax_rate (número o null), total_amount (número o null). Si no hay tabla de productos, line_items queda [].
 """
-
-
-def _get_mime_type(file_path: str) -> str:
-    ext = os.path.splitext(file_path)[1].lower().lstrip('.')
-    return MIME_TYPE_MAP.get(ext, 'image/jpeg')
-
-
-def _clean_json_text(text: str) -> str:
-    text = text.strip()
-    if text.startswith('```'):
-        match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', text)
-        if match:
-            text = match.group(1).strip()
-    return text
 
 
 class GeminiOCRService(BaseOCRService):

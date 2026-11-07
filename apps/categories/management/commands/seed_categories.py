@@ -1,8 +1,7 @@
 from django.apps import apps
-from django.conf import settings
 from django.db import transaction
 from django.utils.text import slugify
-from django.core.management.base import BaseCommand, CommandError
+from django.core.management.base import BaseCommand
 
 
 DEFAULT_SYSTEM_CATEGORIES = [

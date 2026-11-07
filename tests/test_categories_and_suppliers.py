@@ -25,7 +25,6 @@ class TestCategoryEndpoints:
         payload = {'name': 'Mi Categoría', 'color': '#AABBCC', 'icon': 'star'}
         response = auth_client.post(url, payload, format='json')
         assert response.status_code == status.HTTP_201_CREATED
-        data = response.json() if 'name' in response.json() else response.json().get('data', response.json())
         cat = Category.objects.filter(name='Mi Categoría').first()
         assert cat is not None
         assert cat.scope == Category.SCOPE_USER

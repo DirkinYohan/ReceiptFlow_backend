@@ -3,7 +3,6 @@ from django.contrib.auth import get_user_model
 from django.utils import timezone
 from rest_framework import status
 
-from apps.categories.models import Category
 from apps.documents.models import Document
 from apps.expenses.models import Expense
 from apps.suppliers.models import Supplier
@@ -97,7 +96,6 @@ class TestPermissions:
         assert response.status_code in (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN)
 
     def test_cannot_access_other_user_expense(self, auth_client, user, user2, system_categories, supplier):
-        from django.db.models import Q
         other_category = system_categories[0]
         expense = Expense.objects.create(
             user=user2, category=other_category, supplier=supplier,
