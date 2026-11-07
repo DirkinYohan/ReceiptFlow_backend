@@ -1,0 +1,6 @@
+-r production.txt
+
+pytest>=9.0
+pytest-django>=4.9
+pytest-cov>=6.0
+ruff>=0.15

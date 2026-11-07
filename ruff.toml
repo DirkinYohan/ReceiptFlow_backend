@@ -1,0 +1,6 @@
+target-version = "py313"
+line-length = 120
+extend-exclude = ["*/migrations/*", ".venv"]
+
+[lint]
+select = ["F", "E9"]
