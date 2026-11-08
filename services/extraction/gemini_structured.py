@@ -457,6 +457,7 @@ class GeminiStructuredExtractor:
                 response_schema=GEMINI_RESPONSE_SCHEMA,
             )
         except Exception:
+            logger.warning('Could not build the Gemini structured config; using text JSON', exc_info=True)
             return None
 
     def _try_structured(self, client, model_name: str, file_part) -> Optional[ExtractedDocument]:

@@ -558,6 +558,7 @@ class DocumentProcessor:
             try:
                 ocr_result = ocr_future.result()
             except Exception as exc:
+                logger.warning('OCR failed for %s: %s', file_path, exc)
                 ocr_error = exc
             structured_doc = structured_future.result()
 
@@ -815,6 +816,7 @@ def _resolve_supplier(user, processed: ProcessedDocument) -> Optional[Supplier]:
         )
         return supplier
     except Exception:
+        logger.warning('Could not create supplier %r; looking for a match', processed.supplier_name, exc_info=True)
         return Supplier.objects.find_match(
             user=user,
             name=processed.supplier_name,

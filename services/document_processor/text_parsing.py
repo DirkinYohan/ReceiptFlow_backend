@@ -509,6 +509,7 @@ def _settled_charges(sections) -> Optional[Decimal]:
                 try:
                     amount = parse_decimal(str(cell.get('value') or ''), default_currency='COP')
                 except Exception:
+                    logger.debug('Ignoring unreadable section amount %r', cell.get('value'))
                     amount = None
                 if amount is not None:
                     amounts.append(amount)
