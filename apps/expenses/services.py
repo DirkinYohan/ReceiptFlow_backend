@@ -1,9 +1,11 @@
 
 from django.db import transaction
 
-from apps.documents.models import Document, ExpenseItem as DocumentExpenseItem
-from apps.suppliers.models import Supplier
+from apps.documents.models import Document
+from apps.documents.models import ExpenseItem as DocumentExpenseItem
+from apps.expenses.document_values import _expense_values, resolve_category
 from apps.expenses.models import Expense
+from apps.suppliers.models import Supplier
 
 
 class ExpenseService:
@@ -21,7 +23,6 @@ class ExpenseService:
                 existing = document.expenses.first()
                 return existing
 
-            from apps.expenses.automation import _expense_values, resolve_category
 
             values = _expense_values(document)
             if overrides.get('supplier_id') and not overrides.get('supplier') and values['supplier'] is None:

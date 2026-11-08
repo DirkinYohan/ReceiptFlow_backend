@@ -18,7 +18,7 @@ from apps.documents.duplicates import find_logical_duplicate
 from apps.documents.models import Document
 from apps.documents.payables import apply_payment_inference
 from apps.documents.services import document_service
-from apps.expenses.automation import resolve_category
+from apps.expenses.document_values import resolve_category
 from apps.suppliers.models import Supplier
 from services.document_processor.text_parsing import (
     _find_colombian_nit,
@@ -37,7 +37,7 @@ from services.document_processor.text_parsing import (
     _settled_charges,
 )
 from services.extraction.business_rules import is_critical
-from services.extraction.post_validator import structured_extraction_failed
+from services.extraction.post_validator import structured_extraction_failed, validate_extracted
 from services.money import parse_decimal as _parse_decimal
 from services.ocr import OCRResult, extract_ocr
 
@@ -564,7 +564,6 @@ class DocumentProcessor:
 
         structured_ok = structured_doc is not None and not structured_extraction_failed(structured_doc)
         if structured_ok:
-            from services.extraction import validate_extracted
             hint = ocr_result.raw_text if ocr_result is not None else None
             structured_doc = validate_extracted(structured_doc, raw_text_hint=hint)
             return self._processed_from_structured(
