@@ -235,6 +235,13 @@ class UserUpdateSerializer(serializers.ModelSerializer):
         return None
 
 
+def _active_user_with_token(data: dict, **token_filter):
+    users = User.objects.filter(is_active=True, **token_filter)
+    if data.get('email'):
+        users = users.filter(email__iexact=data['email'])
+    return users.get()
+
+
 class ChangePasswordSerializer(serializers.Serializer):
     current_password = serializers.CharField(write_only=True, required=True)
     new_password = serializers.CharField(write_only=True, required=True)
@@ -285,8 +292,8 @@ class PasswordResetRequestSerializer(serializers.Serializer):
 
 
 class PasswordResetConfirmSerializer(serializers.Serializer):
-    email = serializers.EmailField(required=True)
-    token = serializers.CharField(required=True, max_length=128)
+    email = serializers.EmailField(required=False)
+    token = serializers.CharField(required=True, min_length=32, max_length=128)
     new_password = serializers.CharField(write_only=True, required=True)
     confirm_password = serializers.CharField(write_only=True, required=True)
 
@@ -299,12 +306,8 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
                 {'confirm_password': 'Las contraseñas no coinciden.'}
             )
         try:
-            user = User.objects.get(
-                email__iexact=data['email'],
-                password_reset_token=data['token'],
-                is_active=True,
-            )
-        except User.DoesNotExist:
+            user = _active_user_with_token(data, password_reset_token=data['token'])
+        except (User.DoesNotExist, User.MultipleObjectsReturned):
             raise serializers.ValidationError(
                 {'token': 'Token de recuperación inválido.'}
             )
@@ -330,20 +333,16 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
 
 
 class EmailVerificationSerializer(serializers.Serializer):
-    email = serializers.EmailField(required=True)
-    token = serializers.CharField(required=True, max_length=128)
+    email = serializers.EmailField(required=False)
+    token = serializers.CharField(required=True, min_length=32, max_length=128)
 
     def validate_email(self, value):
         return value.lower().strip()
 
     def validate(self, data):
         try:
-            user = User.objects.get(
-                email__iexact=data['email'],
-                email_verification_token=data['token'],
-                is_active=True,
-            )
-        except User.DoesNotExist:
+            user = _active_user_with_token(data, email_verification_token=data['token'])
+        except (User.DoesNotExist, User.MultipleObjectsReturned):
             raise serializers.ValidationError(
                 {'token': 'Token de verificación inválido.'}
             )

@@ -97,7 +97,7 @@ class EmailService:
     @classmethod
     def send_email_verification(cls, user: User) -> bool:
         token = user.regenerate_email_verification_token()
-        verify_url = f'{settings.FRONTEND_URL}/verify-email?token={token}&email={user.email}'
+        verify_url = f'{settings.FRONTEND_URL}/verify-email?token={token}'
         subject = 'Verifica tu correo electrónico - ReceiptFlow'
         context = {
             'user': user,
@@ -119,7 +119,7 @@ class EmailService:
     @classmethod
     def send_password_reset(cls, user: User) -> bool:
         token = user.regenerate_password_reset_token()
-        reset_url = f'{settings.FRONTEND_URL}/reset-password?token={token}&email={user.email}'
+        reset_url = f'{settings.FRONTEND_URL}/reset-password?token={token}'
         subject = 'Restablece tu contraseña - ReceiptFlow'
         context = {
             'user': user,

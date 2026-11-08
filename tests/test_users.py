@@ -301,3 +301,45 @@ class TestSessionsAfterPasswordReset:
         }, format='json')
         response = api_client.post('/api/auth/refresh/', {'refresh': refresh}, format='json')
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+
+@pytest.mark.django_db
+class TestLinksWithoutEmail:
+    def test_verification_email_link_has_no_address(self, api_client):
+        with override_settings(EMAIL_VERIFICATION_REQUIRED=True):
+            api_client.post('/api/auth/register/', TestUserRegistration.REGISTER_PAYLOAD, format='json')
+        body = mail.outbox[-1].alternatives[0][0] if mail.outbox[-1].alternatives else mail.outbox[-1].body
+        assert 'verify-email?token=' in body
+        assert 'email=' not in body
+
+    def test_verify_with_token_only(self, api_client):
+        with override_settings(EMAIL_VERIFICATION_REQUIRED=True):
+            api_client.post('/api/auth/register/', TestUserRegistration.REGISTER_PAYLOAD, format='json')
+        user = User.objects.get(email='new@receiptflow.com')
+        response = api_client.post('/api/auth/verify-email/', {'token': user.email_verification_token}, format='json')
+        assert response.status_code == status.HTTP_200_OK
+        user.refresh_from_db()
+        assert user.is_email_verified
+
+    def test_reset_with_token_only(self, api_client, user):
+        token = user.regenerate_password_reset_token()
+        new_password = 'Nuev4Clave!Segura'
+        response = api_client.post('/api/auth/password-reset/confirm/', {
+            'token': token, 'new_password': new_password, 'confirm_password': new_password,
+        }, format='json')
+        assert response.status_code == status.HTTP_200_OK
+        user.refresh_from_db()
+        assert user.check_password(new_password)
+
+    def test_short_or_empty_tokens_are_rejected(self, api_client, user):
+        for token in ('', 'abc'):
+            response = api_client.post('/api/auth/verify-email/', {'token': token}, format='json')
+            assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_token_from_another_email_is_rejected(self, api_client, user, user2):
+        token = user.regenerate_password_reset_token()
+        response = api_client.post('/api/auth/password-reset/confirm/', {
+            'email': user2.email, 'token': token,
+            'new_password': 'Nuev4Clave!Segura', 'confirm_password': 'Nuev4Clave!Segura',
+        }, format='json')
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
