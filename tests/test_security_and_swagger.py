@@ -343,3 +343,45 @@ class TestSwaggerOpenAPI:
     def test_schema_no_5xx_error(self, api_client):
         response = api_client.get('/api/schema/')
         assert response.status_code < 500
+
+
+class TestSharedCache:
+    def test_rate_limits_and_processing_locks_use_the_shared_cache(self):
+        from django.conf import settings
+
+        assert settings.RATELIMIT_USE_CACHE == 'shared'
+        assert 'shared' in settings.CACHES
+
+    def test_without_redis_the_shared_cache_lives_in_the_database(self, monkeypatch):
+        import importlib
+
+        import config.settings.base as base
+
+        monkeypatch.setenv('REDIS_URL', '')
+        reloaded = importlib.reload(base)
+        try:
+            assert reloaded.CACHES['shared']['BACKEND'] == 'django.core.cache.backends.db.DatabaseCache'
+        finally:
+            importlib.reload(base)
+
+
+@pytest.mark.django_db(transaction=True)
+def test_migration_creates_the_shared_cache_table():
+    import importlib
+
+    from django.core.cache import caches
+    from django.db import connection
+    from django.test import override_settings
+
+    migration = importlib.import_module('apps.common.migrations.0001_shared_cache_table')
+    db_cache = {
+        'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'},
+        'shared': {'BACKEND': 'django.core.cache.backends.db.DatabaseCache', 'LOCATION': 'test_shared_cache'},
+    }
+    with override_settings(CACHES=db_cache):
+        with connection.schema_editor() as editor:
+            migration.create_cache_tables(None, editor)
+        assert 'test_shared_cache' in connection.introspection.table_names()
+        shared = caches.create_connection('shared')
+        assert shared.add('lock', '1', 30) is True
+        assert shared.add('lock', '1', 30) is False

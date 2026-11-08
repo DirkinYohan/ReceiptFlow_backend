@@ -311,6 +311,10 @@ if REDIS_URL:
             'BACKEND': 'django.core.cache.backends.redis.RedisCache',
             'LOCATION': REDIS_URL,
         },
+        'shared': {
+            'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+            'LOCATION': REDIS_URL,
+        },
     }
 else:
     CACHES = {
@@ -321,6 +325,10 @@ else:
         'celery-broker': {
             'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
             'LOCATION': 'receiptflow-celery',
+        },
+        'shared': {
+            'BACKEND': 'django.core.cache.backends.db.DatabaseCache',
+            'LOCATION': 'receiptflow_shared_cache',
         },
     }
 SESSION_ENGINE = 'django.contrib.sessions.backends.cached_db'
@@ -353,7 +361,8 @@ PROCESSING_MAX_ATTEMPTS = env.int('PROCESSING_MAX_ATTEMPTS', default=3)
 CELERY_BEAT_ENABLED = env.bool('CELERY_BEAT_ENABLED', default=True)
 
 RATELIMIT_ENABLE = env.bool('RATELIMIT_ENABLE', default=True)
-RATELIMIT_USE_CACHE = 'default'
+RATELIMIT_USE_CACHE = 'shared'
+RATELIMIT_FAIL_OPEN = True
 RATELIMIT_VIEW = 'apps.common.responses.rate_limited_view'
 RATELIMIT_AUTH_LOGIN = env('RATELIMIT_AUTH_LOGIN', default='10/m')
 RATELIMIT_AUTH_REGISTER = env('RATELIMIT_AUTH_REGISTER', default='5/m')

@@ -7,7 +7,7 @@ from time import perf_counter
 from celery import Task, shared_task
 from celery.exceptions import SoftTimeLimitExceeded
 from django.conf import settings
-from django.core.cache import cache
+from django.core.cache import caches
 from django.utils import timezone
 
 from apps.documents.payables import documents_needing_reminder, due_state
@@ -27,20 +27,24 @@ CACHE_LOCK_TIMEOUT = 60 * 30
 
 def _acquire_processing_lock(document_id) -> bool:
     key = PROCESSING_LOCK_KEY_TEMPLATE.format(document_id=document_id)
-    return cache.add(key, '1', timeout=CACHE_LOCK_TIMEOUT)
+    try:
+        return caches['shared'].add(key, '1', timeout=CACHE_LOCK_TIMEOUT)
+    except Exception:
+        logger.warning('Shared cache unavailable; processing document %s without a lock', document_id, exc_info=True)
+        return True
 
 
 def _release_processing_lock(document_id) -> None:
     key = PROCESSING_LOCK_KEY_TEMPLATE.format(document_id=document_id)
     try:
-        cache.delete(key)
+        caches['shared'].delete(key)
     except Exception:
         logger.warning('Could not release processing lock for document %s', document_id, exc_info=True)
 
 
 def _is_duplicate_task(document_id) -> bool:
     key = PROCESSING_LOCK_KEY_TEMPLATE.format(document_id=document_id)
-    return cache.get(key) is not None
+    return caches['shared'].get(key) is not None
 
 
 def _sanitize_error(exc: BaseException) -> str:

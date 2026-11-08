@@ -25,6 +25,10 @@ CACHES = {
         'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
         'LOCATION': 'celery-broker-cache',
     },
+    'shared': {
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+        'LOCATION': 'receiptflow-test-cache',
+    },
 }
 
 EMAIL_BACKEND = 'django.core.mail.backends.locmem.EmailBackend'

@@ -31,6 +31,10 @@ CACHES = {
         'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
         'LOCATION': 'celery-broker-dev-cache',
     },
+    'shared': {
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+        'LOCATION': 'receiptflow-dev-cache',
+    },
 }
 
 SESSION_ENGINE = 'django.contrib.sessions.backends.db'
