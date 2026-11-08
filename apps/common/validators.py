@@ -26,6 +26,53 @@ def get_file_extension(filename: str) -> str:
     return ext.lower().lstrip('.')
 
 
+def _file_size(file_obj: UploadedFile) -> int:
+    size = getattr(file_obj, 'size', None)
+    if size is not None:
+        return size
+    if not hasattr(file_obj, 'file'):
+        return 0
+    try:
+        file_obj.file.seek(0, os.SEEK_END)
+        size = file_obj.file.tell()
+        file_obj.file.seek(0)
+        return size
+    except (AttributeError, OSError, ValueError):
+        return 0
+
+
+def _read_header(file_obj: UploadedFile, length: int = 1024) -> bytes:
+    pos = file_obj.tell() if hasattr(file_obj, 'tell') else 0
+    try:
+        if hasattr(file_obj, 'seek'):
+            file_obj.seek(0)
+        return file_obj.read(length) if hasattr(file_obj, 'read') else b''
+    finally:
+        if hasattr(file_obj, 'seek'):
+            try:
+                file_obj.seek(pos)
+            except (OSError, ValueError):
+                logger.warning('Could not rewind uploaded file %s', getattr(file_obj, 'name', ''))
+
+
+def _header_matches_extension(ext: str, header: bytes) -> bool:
+    if ext == 'pdf':
+        return header.startswith(b'%PDF-')
+    if ext == 'png':
+        return header.startswith(b'\x89PNG\r\n\x1a\n')
+    if ext in ('jpg', 'jpeg'):
+        return header.startswith(b'\xff\xd8\xff')
+    if ext == 'gif':
+        return header.startswith(b'GIF87a') or header.startswith(b'GIF89a')
+    if ext == 'bmp':
+        return header.startswith(b'BM')
+    if ext == 'tiff':
+        return header.startswith(b'II*\x00') or header.startswith(b'MM\x00*')
+    if ext == 'webp':
+        return len(header) >= 12 and header[:4] == b'RIFF' and header[8:12] == b'WEBP'
+    return False
+
+
 def validate_uploaded_file(
     file_obj: UploadedFile,
     allowed_extensions=None,
@@ -49,58 +96,18 @@ def validate_uploaded_file(
             f'Tipo de archivo no permitido (.{ext}). Extensiones permitidas: {", ".join(allowed_lower)}.'
         )
 
-    max_bytes = max_size_mb * 1024 * 1024
-    size = getattr(file_obj, 'size', None)
-    if size is None:
-        if hasattr(file_obj, 'file'):
-            try:
-                file_obj.file.seek(0, os.SEEK_END)
-                size = file_obj.file.tell()
-                file_obj.file.seek(0)
-            except (AttributeError, OSError, ValueError):
-                size = 0
-        else:
-            size = 0
-    if size and size > max_bytes:
+    size = _file_size(file_obj)
+    if size and size > max_size_mb * 1024 * 1024:
         raise ValidationError(
             f'El archivo excede el tamaño máximo permitido ({max_size_mb}MB).'
         )
 
     if getattr(settings, 'STRICT_MIME_VERIFICATION', True):
-        pos = file_obj.tell() if hasattr(file_obj, 'tell') else 0
-        header = b''
-        try:
-            if hasattr(file_obj, 'seek'):
-                file_obj.seek(0)
-            header = file_obj.read(1024) if hasattr(file_obj, 'read') else b''
-        finally:
-            if hasattr(file_obj, 'seek'):
-                try:
-                    file_obj.seek(pos)
-                except (OSError, ValueError):
-                    logger.warning('Could not rewind uploaded file %s', getattr(file_obj, 'name', ''))
-
-        if header:
-            is_valid_magic = False
-            if ext == 'pdf' and header.startswith(b'%PDF-'):
-                is_valid_magic = True
-            elif ext == 'png' and header.startswith(b'\x89PNG\r\n\x1a\n'):
-                is_valid_magic = True
-            elif ext in ('jpg', 'jpeg') and header.startswith(b'\xff\xd8\xff'):
-                is_valid_magic = True
-            elif ext == 'gif' and (header.startswith(b'GIF87a') or header.startswith(b'GIF89a')):
-                is_valid_magic = True
-            elif ext == 'bmp' and header.startswith(b'BM'):
-                is_valid_magic = True
-            elif ext == 'tiff' and (header.startswith(b'II*\x00') or header.startswith(b'MM\x00*')):
-                is_valid_magic = True
-            elif ext == 'webp' and len(header) >= 12 and header[:4] == b'RIFF' and header[8:12] == b'WEBP':
-                is_valid_magic = True
-
-            if not is_valid_magic:
-                raise ValidationError(
-                    f'El contenido del archivo no corresponde a un formato .{ext} válido o está corrupto.'
-                )
+        header = _read_header(file_obj)
+        if header and not _header_matches_extension(ext, header):
+            raise ValidationError(
+                f'El contenido del archivo no corresponde a un formato .{ext} válido o está corrupto.'
+            )
 
 
 class ValidatedFileField(serializers.FileField):

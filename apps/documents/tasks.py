@@ -99,21 +99,56 @@ class DocumentTaskBase(Task):
             _release_processing_lock(doc_id)
 
 
-@shared_task(base=DocumentTaskBase, bind=True, name='apps.documents.tasks.process_document_task')
-def process_document_task(self, document_id: int):
+def _document_to_process(document_id):
     if not isinstance(document_id, int) or document_id <= 0:
         logger.warning('Invalid document_id=%s, skipping.', document_id)
-        return {'ok': False, 'reason': 'invalid_id'}
-
+        return None, {'ok': False, 'reason': 'invalid_id'}
     try:
         document = Document.objects.get(pk=document_id)
     except Document.DoesNotExist:
         logger.warning('Document %s does not exist, abandoning task.', document_id)
-        return {'ok': False, 'reason': 'not_found'}
-
+        return None, {'ok': False, 'reason': 'not_found'}
     if document.status == Document.STATUS_COMPLETED:
         logger.info('Document %s already COMPLETED, skipping duplicate task.', document_id)
-        return {'ok': True, 'skipped': True, 'reason': 'already_completed'}
+        return None, {'ok': True, 'skipped': True, 'reason': 'already_completed'}
+    return document, None
+
+
+def _finish_processing(document: Document, result: dict, processing_ms: float) -> dict:
+    requires_review = bool(result.get('requires_review'))
+    if requires_review:
+        reasons = '; '.join(result.get('review_reasons', [])[:3]) or 'Campos incompletos.'
+        document.mark_review_required(reasons)
+    else:
+        document.mark_completed(processing_time_ms=int(processing_ms))
+        expense = sync_expense_safely(document)
+        if expense is not None:
+            logger.info('Document %s auto-registered as expense %s', document.pk, expense.pk)
+    logger.info(
+        'Document %s processed in %.1fms status=%s',
+        document.pk, processing_ms, document.status,
+    )
+    return {
+        'ok': True,
+        'document_id': document.pk,
+        'status': document.status,
+        'processing_time_ms': int(processing_ms),
+        'requires_review': requires_review,
+    }
+
+
+def _is_retriable(exc: BaseException) -> bool:
+    return any(
+        name in exc.__class__.__name__
+        for name in ('Timeout', 'Connection', 'Network', 'Temporary', 'Unavailable')
+    )
+
+
+@shared_task(base=DocumentTaskBase, bind=True, name='apps.documents.tasks.process_document_task')
+def process_document_task(self, document_id: int):
+    document, skipped = _document_to_process(document_id)
+    if skipped is not None:
+        return skipped
 
     if not _acquire_processing_lock(document_id):
         logger.info('Could not acquire lock for document %s, skipping duplicate task.', document_id)
@@ -125,27 +160,7 @@ def process_document_task(self, document_id: int):
     t0 = perf_counter()
     try:
         result = processor.process_document_pipeline(document)
-        processing_ms = (perf_counter() - t0) * 1000
-        requires_review = bool(result.get('requires_review'))
-        if requires_review:
-            reasons = '; '.join(result.get('review_reasons', [])[:3]) or 'Campos incompletos.'
-            document.mark_review_required(reasons)
-        else:
-            document.mark_completed(processing_time_ms=int(processing_ms))
-            expense = sync_expense_safely(document)
-            if expense is not None:
-                logger.info('Document %s auto-registered as expense %s', document_id, expense.pk)
-        logger.info(
-            'Document %s processed in %.1fms status=%s',
-            document_id, processing_ms, document.status,
-        )
-        return {
-            'ok': True,
-            'document_id': document_id,
-            'status': document.status,
-            'processing_time_ms': int(processing_ms),
-            'requires_review': requires_review,
-        }
+        return _finish_processing(document, result, (perf_counter() - t0) * 1000)
     except SoftTimeLimitExceeded as exc:
         processing_ms = (perf_counter() - t0) * 1000
         logger.warning('Document %s timed out after %.1fms', document_id, processing_ms)
@@ -158,10 +173,7 @@ def process_document_task(self, document_id: int):
             'Document %s processing failed after %.1fms err=%s',
             document_id, processing_ms, safe_error,
         )
-        retriable = any(
-            name in exc.__class__.__name__
-            for name in ('Timeout', 'Connection', 'Network', 'Temporary', 'Unavailable')
-        )
+        retriable = _is_retriable(exc)
         attempts = getattr(document, 'processing_attempts', 0) or 0
         max_attempts = getattr(settings, 'PROCESSING_MAX_ATTEMPTS', 3)
         if retriable and attempts < max_attempts:
