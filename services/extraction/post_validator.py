@@ -592,6 +592,60 @@ def _filter_line_items(line_items, warn) -> tuple:
     return kept, removed
 
 
+def _route_utility_items(doc: ExtractedDocument, items, raw_text_hint, warn):
+    service_concepts = list(doc.service_concepts)
+    if items and _is_utility_document(doc, raw_text_hint):
+        for item in items:
+            service_concepts.append(ServiceConcept(
+                description=item.description,
+                amount=item.total if item.total is not None else item.unit_price,
+            ))
+        warn(
+            "PUBLIC_SERVICE_NO_LINE_ITEMS",
+            "public-service document has no product table; charges moved to service_concepts",
+        )
+        items = []
+    elif doc.has_product_table is False and items:
+        warn("NO_PRODUCT_TABLE", "has_product_table is false; line_items replaced with []")
+        items = []
+    return items, service_concepts
+
+
+def _normalized_sections(doc: ExtractedDocument, service_concepts, raw_text_hint, warn):
+    sections = _split_side_by_side_sections(list(doc.sections))
+    section_count = len(sections)
+    sections = _split_measurement_from_charges(sections)
+    sections = _relocate_month_used_as_stratum(sections)
+    if len(sections) > section_count:
+        warn(
+            'SECTION_TABLES_SPLIT',
+            'measurement columns and charge columns were returned in one table',
+        )
+    if _is_utility_document(doc, raw_text_hint) and service_concepts and not sections:
+        built = _section_from_concepts(service_concepts)
+        if built is not None:
+            sections.append(built)
+    return sections
+
+
+def _check_line_item_math(items, sections, tolerance, warn):
+    items = list(items)
+    for idx, item in enumerate(items, start=1):
+        if item.quantity is None and item.unit_price is None and item.total is None:
+            warn("LINE_ITEM_INCOMPLETE", f"item #{idx} has no quantity, price or total")
+        if item.quantity is None or item.unit_price is None or item.total is None:
+            continue
+        discount = item.discount or Decimal('0')
+        base = (item.quantity * item.unit_price) - discount
+        with_tax = base + (item.tax_amount or Decimal('0'))
+        if abs(base - item.total) > tolerance and abs(with_tax - item.total) > tolerance:
+            warn("LINE_ITEM_MATH_MISMATCH",
+                  f"item #{idx} qty*price-discount={base} vs total={item.total}")
+            if sections:
+                items[idx - 1] = item.model_copy(update={'quantity': None, 'unit_price': None})
+    return items
+
+
 def validate_extracted(doc: ExtractedDocument, raw_text_hint: Optional[str] = None) -> ExtractedDocument:
     refined_class = _refine_document_class(doc, raw_text_hint)
     if refined_class != doc.document_class:
@@ -647,54 +701,16 @@ def validate_extracted(doc: ExtractedDocument, raw_text_hint: Optional[str] = No
         _warn("FAUX_LINE_ITEMS_FILTERED",
               f"removed {removed} non-product line(s); kept {len(items)} product line(s)")
 
-    service_concepts = list(doc.service_concepts)
-    if items and _is_utility_document(doc, raw_text_hint):
-        for item in items:
-            service_concepts.append(ServiceConcept(
-                description=item.description,
-                amount=item.total if item.total is not None else item.unit_price,
-            ))
-        _warn(
-            "PUBLIC_SERVICE_NO_LINE_ITEMS",
-            "public-service document has no product table; charges moved to service_concepts",
-        )
-        items = []
-    elif doc.has_product_table is False and items:
-        _warn("NO_PRODUCT_TABLE", "has_product_table is false; line_items replaced with []")
-        items = []
+    items, service_concepts = _route_utility_items(doc, items, raw_text_hint, _warn)
 
-    sections = _split_side_by_side_sections(list(doc.sections))
-    section_count = len(sections)
-    sections = _split_measurement_from_charges(sections)
-    sections = _relocate_month_used_as_stratum(sections)
-    if len(sections) > section_count:
-        _warn(
-            'SECTION_TABLES_SPLIT',
-            'measurement columns and charge columns were returned in one table',
-        )
-    if _is_utility_document(doc, raw_text_hint) and service_concepts and not sections:
-        built = _section_from_concepts(service_concepts)
-        if built is not None:
-            sections.append(built)
+    sections = _normalized_sections(doc, service_concepts, raw_text_hint, _warn)
 
     tolerance = Decimal('2.00') if (doc.currency or "COP") == "COP" else Decimal('0.50')
     items, ambiguous = neutralize_implausible_line_totals(items, doc.subtotal, tolerance)
     for code, message, _critical in ambiguous:
         _warn(code, message)
 
-    for idx, item in enumerate(items, start=1):
-        if item.quantity is None and item.unit_price is None and item.total is None:
-            _warn("LINE_ITEM_INCOMPLETE", f"item #{idx} has no quantity, price or total")
-        if item.quantity is None or item.unit_price is None or item.total is None:
-            continue
-        discount = item.discount or Decimal('0')
-        base = (item.quantity * item.unit_price) - discount
-        with_tax = base + (item.tax_amount or Decimal('0'))
-        if abs(base - item.total) > tolerance and abs(with_tax - item.total) > tolerance:
-            _warn("LINE_ITEM_MATH_MISMATCH",
-                  f"item #{idx} qty*price-discount={base} vs total={item.total}")
-            if sections:
-                items[idx - 1] = item.model_copy(update={'quantity': None, 'unit_price': None})
+    items = _check_line_item_math(items, sections, tolerance, _warn)
 
     if items and doc.subtotal is not None and all(item.total is not None for item in items):
         items_sum = _sum_items_totals(items)

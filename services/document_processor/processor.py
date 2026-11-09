@@ -263,9 +263,49 @@ def _apply_structured_review_rules(processed: ProcessedDocument, structured: 'Ex
                 processed.review_reasons.append(warning)
 
 
+_GEMINI_TEXT_FIELDS = {
+    'supplier_name': 'supplier_name',
+    'cufe': 'cufe',
+    'document_number': 'document_number',
+    'supplier_address': 'supplier_address',
+    'supplier_phone': 'supplier_phone',
+    'supplier_website': 'supplier_website',
+}
+
+_GEMINI_AMOUNT_FIELDS = (
+    'total_amount', 'subtotal_amount', 'tax_amount', 'iva_amount', 'discount_amount', 'tip_amount',
+)
+
+
+def _gemini_line_items(raw_items: list) -> list:
+    g_items = []
+    for idx, item in enumerate(raw_items, start=1):
+        if isinstance(item, dict):
+            desc = str(item.get('description', '')).strip()
+            qty = _parse_decimal(str(item.get('quantity', 1))) or Decimal('1.00')
+            u_price = _parse_decimal(str(item.get('unit_price', 0))) or Decimal('0.00')
+            t_amt = _parse_decimal(str(item.get('total_amount', 0))) or (qty * u_price)
+            tax_rt = _parse_decimal(str(item.get('tax_rate', 0)))
+            g_items.append({
+                'sequence': idx,
+                'sku': '',
+                'description': desc,
+                'quantity': qty,
+                'unit_price': u_price,
+                'total_amount': t_amt,
+                'tax_rate': tax_rt,
+                'tax_amount': None,
+                'discount_amount': Decimal('0.00'),
+                'notes': '',
+                'extra': {'source': 'gemini'},
+            })
+    return g_items
+
+
 def _merge_gemini_fallback(processed: ProcessedDocument, gemini_data, currency: str) -> None:
-    if not processed.supplier_name and gemini_data.get('supplier_name'):
-        processed.supplier_name = str(gemini_data['supplier_name']).strip()
+    for attr, key in _GEMINI_TEXT_FIELDS.items():
+        if not getattr(processed, attr) and gemini_data.get(key):
+            setattr(processed, attr, str(gemini_data[key]).strip())
 
     if not processed.supplier_nit and gemini_data.get('supplier_nit'):
         nit_clean = re.sub(r'\D', '', str(gemini_data['supplier_nit']))
@@ -278,23 +318,8 @@ def _merge_gemini_fallback(processed: ProcessedDocument, gemini_data, currency: 
             else:
                 processed.supplier_tax_id = nit_clean
 
-    if not processed.cufe and gemini_data.get('cufe'):
-        processed.cufe = str(gemini_data['cufe']).strip()
-
-    if not processed.document_number and gemini_data.get('document_number'):
-        processed.document_number = str(gemini_data['document_number']).strip()
-
-    if not processed.supplier_address and gemini_data.get('supplier_address'):
-        processed.supplier_address = str(gemini_data['supplier_address']).strip()
-
-    if not processed.supplier_phone and gemini_data.get('supplier_phone'):
-        processed.supplier_phone = str(gemini_data['supplier_phone']).strip()
-
     if not processed.supplier_email and gemini_data.get('supplier_email'):
         processed.supplier_email = str(gemini_data['supplier_email']).strip().lower()
-
-    if not processed.supplier_website and gemini_data.get('supplier_website'):
-        processed.supplier_website = str(gemini_data['supplier_website']).strip()
 
     if not processed.issue_date and gemini_data.get('issue_date'):
         try:
@@ -305,23 +330,9 @@ def _merge_gemini_fallback(processed: ProcessedDocument, gemini_data, currency: 
         except ValueError:
             logger.debug('Ignoring unreadable issue date %r', gemini_data.get('issue_date'))
 
-    if not processed.total_amount and gemini_data.get('total_amount') is not None:
-        processed.total_amount = _parse_decimal(str(gemini_data['total_amount']), default_currency=currency)
-
-    if not processed.subtotal_amount and gemini_data.get('subtotal_amount') is not None:
-        processed.subtotal_amount = _parse_decimal(str(gemini_data['subtotal_amount']), default_currency=currency)
-
-    if not processed.tax_amount and gemini_data.get('tax_amount') is not None:
-        processed.tax_amount = _parse_decimal(str(gemini_data['tax_amount']), default_currency=currency)
-
-    if not processed.iva_amount and gemini_data.get('iva_amount') is not None:
-        processed.iva_amount = _parse_decimal(str(gemini_data['iva_amount']), default_currency=currency)
-
-    if not processed.discount_amount and gemini_data.get('discount_amount') is not None:
-        processed.discount_amount = _parse_decimal(str(gemini_data['discount_amount']), default_currency=currency)
-
-    if not processed.tip_amount and gemini_data.get('tip_amount') is not None:
-        processed.tip_amount = _parse_decimal(str(gemini_data['tip_amount']), default_currency=currency)
+    for attr in _GEMINI_AMOUNT_FIELDS:
+        if not getattr(processed, attr) and gemini_data.get(attr) is not None:
+            setattr(processed, attr, _parse_decimal(str(gemini_data[attr]), default_currency=currency))
 
     if (not processed.payment_method or processed.payment_method == Document.PAYMENT_METHOD_OTHER) and gemini_data.get('payment_method'):
         pm = str(gemini_data['payment_method']).lower().strip()
@@ -329,32 +340,65 @@ def _merge_gemini_fallback(processed: ProcessedDocument, gemini_data, currency: 
             processed.payment_method = pm
 
     if not processed.line_items and gemini_data.get('line_items') and isinstance(gemini_data['line_items'], list):
-        g_items = []
-        for idx, item in enumerate(gemini_data['line_items'], start=1):
-            if isinstance(item, dict):
-                desc = str(item.get('description', '')).strip()
-                qty = _parse_decimal(str(item.get('quantity', 1))) or Decimal('1.00')
-                u_price = _parse_decimal(str(item.get('unit_price', 0))) or Decimal('0.00')
-                t_amt = _parse_decimal(str(item.get('total_amount', 0))) or (qty * u_price)
-                tax_rt = _parse_decimal(str(item.get('tax_rate', 0)))
-                g_items.append({
-                    'sequence': idx,
-                    'sku': '',
-                    'description': desc,
-                    'quantity': qty,
-                    'unit_price': u_price,
-                    'total_amount': t_amt,
-                    'tax_rate': tax_rt,
-                    'tax_amount': None,
-                    'discount_amount': Decimal('0.00'),
-                    'notes': '',
-                    'extra': {'source': 'gemini'},
-                })
+        g_items = _gemini_line_items(gemini_data['line_items'])
         if g_items:
             processed.line_items = g_items
 
     if not processed.category and gemini_data.get('suggested_category'):
         processed.category = str(gemini_data['suggested_category']).strip()
+
+
+def _line_items_with_defaults(line_items) -> list:
+    mapped = []
+    for idx, item in enumerate(line_items, start=1):
+        description = (item.description or '').strip()[:500]
+        if not description:
+            continue
+        mapped.append({
+            'sequence': idx,
+            'sku': item.sku or '',
+            'description': description,
+            'quantity': item.quantity if item.quantity is not None else Decimal('1'),
+            'unit_price': item.unit_price if item.unit_price is not None else Decimal('0'),
+            'tax_rate': item.tax_rate,
+            'tax_amount': item.tax_amount or Decimal('0'),
+            'discount_amount': item.discount or Decimal('0'),
+            'total_amount': item.total if item.total is not None else Decimal('0'),
+            'extra': {'source': 'gemini_structured'},
+        })
+    return mapped
+
+
+def _overlay_structured_identity(processed: ProcessedDocument, structured: 'ExtractedDocument') -> None:
+    if structured.document_type:
+        processed.document_type = structured.document_type
+    if structured.supplier_name:
+        processed.supplier_name = structured.supplier_name
+    if structured.invoice_number:
+        processed.document_number = structured.invoice_number
+    if structured.supplier_tax_id:
+        processed.supplier_nit = structured.supplier_tax_id
+    if structured.supplier_tax_id_verification_digit:
+        processed.supplier_verification_digit = structured.supplier_tax_id_verification_digit
+        if processed.supplier_nit and '-' not in processed.supplier_nit:
+            processed.supplier_tax_id = (
+                f"{processed.supplier_nit}-{structured.supplier_tax_id_verification_digit}"
+            )
+    elif structured.supplier_tax_id:
+        processed.supplier_tax_id = structured.supplier_tax_id
+    if structured.cufe:
+        processed.cufe = structured.cufe
+    if structured.issue_date:
+        processed.issue_date = structured.issue_date
+        issued = _aware_from_iso_date(structured.issue_date)
+        if issued is not None:
+            processed.issued_at = issued
+    if structured.due_date:
+        due = _aware_from_iso_date(structured.due_date)
+        if due is not None:
+            processed.due_date = due
+    if structured.issue_time:
+        processed.issue_time = structured.issue_time
 
 
 class DocumentProcessor:
@@ -386,35 +430,7 @@ class DocumentProcessor:
         processed: 'ProcessedDocument',
         structured: 'ExtractedDocument',
     ) -> 'ProcessedDocument':
-        if structured.document_type:
-            processed.document_type = structured.document_type
-        if structured.supplier_name:
-            processed.supplier_name = structured.supplier_name
-        if structured.invoice_number:
-            processed.document_number = structured.invoice_number
-        if structured.supplier_tax_id:
-            processed.supplier_nit = structured.supplier_tax_id
-        if structured.supplier_tax_id_verification_digit:
-            processed.supplier_verification_digit = structured.supplier_tax_id_verification_digit
-            if processed.supplier_nit and '-' not in processed.supplier_nit:
-                processed.supplier_tax_id = (
-                    f"{processed.supplier_nit}-{structured.supplier_tax_id_verification_digit}"
-                )
-        elif structured.supplier_tax_id:
-            processed.supplier_tax_id = structured.supplier_tax_id
-        if structured.cufe:
-            processed.cufe = structured.cufe
-        if structured.issue_date:
-            processed.issue_date = structured.issue_date
-            issued = _aware_from_iso_date(structured.issue_date)
-            if issued is not None:
-                processed.issued_at = issued
-        if structured.due_date:
-            due = _aware_from_iso_date(structured.due_date)
-            if due is not None:
-                processed.due_date = due
-        if structured.issue_time:
-            processed.issue_time = structured.issue_time
+        _overlay_structured_identity(processed, structured)
         if structured.currency:
             processed.currency = structured.currency
         if structured.payment_method:
@@ -430,25 +446,7 @@ class DocumentProcessor:
             if iva_total is not None:
                 processed.iva_amount = iva_total
         if not structured_extraction_failed(structured):
-            mapped = []
-            from decimal import Decimal as _Dec2
-            for idx, item in enumerate(structured.line_items, start=1):
-                description = (item.description or '').strip()[:500]
-                if not description:
-                    continue
-                mapped.append({
-                    'sequence': idx,
-                    'sku': item.sku or '',
-                    'description': description,
-                    'quantity': item.quantity if item.quantity is not None else _Dec2('1'),
-                    'unit_price': item.unit_price if item.unit_price is not None else _Dec2('0'),
-                    'tax_rate': item.tax_rate,
-                    'tax_amount': item.tax_amount or _Dec2('0'),
-                    'discount_amount': item.discount or _Dec2('0'),
-                    'total_amount': item.total if item.total is not None else _Dec2('0'),
-                    'extra': {'source': 'gemini_structured'},
-                })
-            processed.line_items = mapped
+            processed.line_items = _line_items_with_defaults(structured.line_items)
         if structured.warnings:
             for w in structured.warnings:
                 if w not in processed.warnings:

@@ -408,3 +408,40 @@ class TestLogicalDuplicateDetection:
         assert result.get('reused_from_document_id') == completed.pk
         dup.refresh_from_db()
         assert 'Duplicado' in (dup.notes or '')
+
+
+class TestGeminiFallbackMerge:
+    def test_fills_missing_fields_and_keeps_existing_ones(self):
+        from decimal import Decimal
+
+        from services.document_processor.processor import ProcessedDocument, _merge_gemini_fallback
+
+        processed = ProcessedDocument()
+        processed.supplier_name = 'Leído por OCR'
+        _merge_gemini_fallback(processed, {
+            'supplier_name': 'Gemini',
+            'cufe': ' abc123 ',
+            'document_number': 'FE-10',
+            'supplier_nit': '900.123.456',
+            'supplier_verification_digit': '7',
+            'supplier_email': 'VENTAS@EJEMPLO.CO ',
+            'issue_date': '2026-10-05',
+            'total_amount': '125.000',
+            'tax_amount': '19.000',
+            'payment_method': 'CARD',
+            'line_items': [{'description': 'Café', 'quantity': 2, 'unit_price': 3000}],
+            'suggested_category': 'Alimentación',
+        }, 'COP')
+
+        assert processed.supplier_name == 'Leído por OCR'
+        assert processed.cufe == 'abc123'
+        assert processed.document_number == 'FE-10'
+        assert processed.supplier_tax_id == '900123456-7'
+        assert processed.supplier_email == 'ventas@ejemplo.co'
+        assert processed.issue_date == '2026-10-05'
+        assert processed.total_amount == Decimal('125000')
+        assert processed.tax_amount == Decimal('19000')
+        assert processed.payment_method == 'card'
+        assert processed.line_items[0]['description'] == 'Café'
+        assert processed.line_items[0]['total_amount'] == Decimal('6000')
+        assert processed.category == 'Alimentación'
