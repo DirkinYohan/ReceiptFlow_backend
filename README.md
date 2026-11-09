@@ -1,6 +1,6 @@
 # ReceiptFlow Backend
 
-Backend profesional y escalable de **ReceiptFlow**, aplicación web para gestionar recibos y facturas mediante OCR con Google Cloud Vision API.
+Backend profesional y escalable de **ReceiptFlow**, aplicación web para gestionar recibos y facturas mediante OCR y extracción con Google Gemini.
 
 ## Estructura del proyecto
 
@@ -24,7 +24,6 @@ ReceiptFlow_backend/
 │   └── reports/               # Reportes y agrupaciones
 │
 ├── services/                  # Servicios de infraestructura
-│   ├── google_vision/         # Cliente de Google Cloud Vision API
 │   ├── ocr/                   # Abstracción y registros de servicios OCR
 │   └── document_processor/    # Orquestación OCR -> datos estructurados
 │
@@ -49,7 +48,7 @@ ReceiptFlow_backend/
 - **Django 4.2+**
 - **Django REST Framework 3.14+**
 - **PostgreSQL**
-- **Google Cloud Vision API**
+- **Google Gemini API**
 - **JWT** (djangorestframework-simplejwt)
 - **CORS** (django-cors-headers)
 
@@ -107,4 +106,4 @@ ReceiptFlow_backend/
 - Modelos iniciales (User, Document, Expense, Category, Supplier, Report) con serializers, viewsets, urls y admin.
 - Endpoints REST versionados bajo `/api/v1/`.
 - Carpetas `media/` y `static/` configuradas.
-- Abstracción de servicios para Google Cloud Vision (`services/google_vision/client.py`), OCR (`services/ocr/`) y procesamiento de documentos (`services/document_processor/processor.py`), con métodos preparados para implementar la lógica de extracción.
+- Abstracción de servicios para OCR (`services/ocr/`) y procesamiento de documentos (`services/document_processor/processor.py`), con métodos preparados para implementar la lógica de extracción.

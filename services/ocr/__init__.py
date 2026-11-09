@@ -3,7 +3,6 @@ import logging
 from django.conf import settings
 
 
-from .google_vision_service import GoogleVisionOCRService
 from .gemini_service import GeminiOCRService
 from .base import OCRResult, BaseOCRService, registry as _registry
 
@@ -12,7 +11,6 @@ logger = logging.getLogger(__name__)
 __all__ = [
     'OCRResult',
     'BaseOCRService',
-    'GoogleVisionOCRService',
     'GeminiOCRService',
     'extract_ocr',
     'registry',
