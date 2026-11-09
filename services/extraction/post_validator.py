@@ -646,6 +646,58 @@ def _check_line_item_math(items, sections, tolerance, warn):
     return items
 
 
+def _check_tax_id(doc: ExtractedDocument, warn) -> None:
+    if doc.supplier_tax_id is not None:
+        digits = re.sub(r'\D', '', doc.supplier_tax_id)
+        if not (8 <= len(digits) <= 12):
+            warn("NIT_INVALID_FORMAT",
+                 f"supplier_tax_id={doc.supplier_tax_id!r} must be 8-12 digits")
+    if doc.supplier_tax_id_verification_digit is not None:
+        digit = doc.supplier_tax_id_verification_digit
+        if not (len(digit) == 1 and digit.isdigit()):
+            warn("NIT_DV_INVALID", f"verification_digit={digit!r}")
+
+
+def _check_dates(doc: ExtractedDocument, warn) -> None:
+    for fname in (
+        "issue_date", "generation_date", "due_date", "billing_period",
+        "billing_period_start", "billing_period_end", "suspension_date", "payment_date",
+    ):
+        value = getattr(doc, fname, None)
+        if value is None or _is_date(value):
+            continue
+        if fname == "billing_period" and re.fullmatch(r'\d{4}-\d{2}', value or ''):
+            continue
+        if isinstance(value, str) and len(value) <= 40 and _looks_like_date(value):
+            continue
+        warn("DATE_INVALID_FORMAT", f"{fname}={value!r}")
+
+    issue = _parse_iso(doc.issue_date)
+    due = _parse_iso(doc.due_date)
+    if issue and due and due < issue:
+        warn("DATE_ORDER_INVALID",
+             f"due_date={doc.due_date} is earlier than issue_date={doc.issue_date}")
+
+
+def _reconcile_totals(doc: ExtractedDocument, items, tolerance, warn) -> ExtractedDocument:
+    if items and doc.subtotal is not None and all(item.total is not None for item in items):
+        items_sum = _sum_items_totals(items)
+        if abs(items_sum - doc.subtotal) > tolerance:
+            warn("LINE_TOTALS_SUM_MISMATCH",
+                 f"sum(line_items.total)={items_sum} vs subtotal={doc.subtotal}")
+
+    discounts = _sum_discounts(items)
+    taxes, tax_warnings = reconcile_taxes(
+        doc.taxes, items, doc.subtotal, discounts, tolerance, doc.currency,
+    )
+    doc = doc.model_copy(update={'taxes': taxes})
+    for code, message, _critical in tax_warnings:
+        warn(code, message)
+    for code, message, _critical in document_total_warnings(doc, items, tolerance):
+        warn(code, message)
+    return doc
+
+
 def validate_extracted(doc: ExtractedDocument, raw_text_hint: Optional[str] = None) -> ExtractedDocument:
     refined_class = _refine_document_class(doc, raw_text_hint)
     if refined_class != doc.document_class:
@@ -659,34 +711,8 @@ def validate_extracted(doc: ExtractedDocument, raw_text_hint: Optional[str] = No
         if text not in warnings:
             warnings.append(text)
 
-    if doc.supplier_tax_id is not None:
-        digits = re.sub(r'\D', '', doc.supplier_tax_id)
-        if not (8 <= len(digits) <= 12):
-            _warn("NIT_INVALID_FORMAT",
-                  f"supplier_tax_id={doc.supplier_tax_id!r} must be 8-12 digits")
-    if doc.supplier_tax_id_verification_digit is not None:
-        digit = doc.supplier_tax_id_verification_digit
-        if not (len(digit) == 1 and digit.isdigit()):
-            _warn("NIT_DV_INVALID", f"verification_digit={digit!r}")
-
-    for fname in (
-        "issue_date", "generation_date", "due_date", "billing_period",
-        "billing_period_start", "billing_period_end", "suspension_date", "payment_date",
-    ):
-        value = getattr(doc, fname, None)
-        if value is None or _is_date(value):
-            continue
-        if fname == "billing_period" and re.fullmatch(r'\d{4}-\d{2}', value or ''):
-            continue
-        if isinstance(value, str) and len(value) <= 40 and _looks_like_date(value):
-            continue
-        _warn("DATE_INVALID_FORMAT", f"{fname}={value!r}")
-
-    issue = _parse_iso(doc.issue_date)
-    due = _parse_iso(doc.due_date)
-    if issue and due and due < issue:
-        _warn("DATE_ORDER_INVALID",
-              f"due_date={doc.due_date} is earlier than issue_date={doc.issue_date}")
+    _check_tax_id(doc, _warn)
+    _check_dates(doc, _warn)
 
     doc = _relabel_utility_dates(doc, raw_text_hint, _warn)
     doc = _apply_labeled_fields(doc, raw_text_hint, _warn)
@@ -712,21 +738,7 @@ def validate_extracted(doc: ExtractedDocument, raw_text_hint: Optional[str] = No
 
     items = _check_line_item_math(items, sections, tolerance, _warn)
 
-    if items and doc.subtotal is not None and all(item.total is not None for item in items):
-        items_sum = _sum_items_totals(items)
-        if abs(items_sum - doc.subtotal) > tolerance:
-            _warn("LINE_TOTALS_SUM_MISMATCH",
-                  f"sum(line_items.total)={items_sum} vs subtotal={doc.subtotal}")
-
-    discounts = _sum_discounts(items)
-    taxes, tax_warnings = reconcile_taxes(
-        doc.taxes, items, doc.subtotal, discounts, tolerance, doc.currency,
-    )
-    doc = doc.model_copy(update={'taxes': taxes})
-    for code, message, _critical in tax_warnings:
-        _warn(code, message)
-    for code, message, _critical in document_total_warnings(doc, items, tolerance):
-        _warn(code, message)
+    doc = _reconcile_totals(doc, items, tolerance, _warn)
 
     invoice_number = doc.invoice_number
     if invoice_number is not None:

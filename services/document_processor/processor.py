@@ -401,6 +401,51 @@ def _overlay_structured_identity(processed: ProcessedDocument, structured: 'Extr
         processed.issue_time = structured.issue_time
 
 
+def _read_supplier_contact(processed: ProcessedDocument, lines: list, text: str) -> None:
+    processed.supplier_name = _find_supplier_name(lines, text)
+    processed.supplier_address = _find_supplier_address(lines)
+    processed.supplier_phone = _find_supplier_phone(lines, text)
+
+    email_matches = re.findall(r'\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b', text)
+    if email_matches:
+        processed.supplier_email = email_matches[0].lower()
+
+    url_matches = re.findall(r'\b(?:https?://)?(?:www\.)?[A-Za-z0-9\-]+\.[A-Za-z]{2,}(?:/[^\s]*)?\b', text)
+    if url_matches:
+        processed.supplier_website = url_matches[0]
+
+
+def _apply_financial_breakdown(processed: ProcessedDocument, fin: dict) -> None:
+    processed.subtotal_amount = fin['subtotal']
+    processed.tax_amount = fin['tax_amount']
+    processed.iva_amount = fin['iva_amount']
+    processed.discount_amount = fin['discount_amount']
+    processed.tip_amount = fin['tip_amount']
+    processed.withholdings = fin['withholdings']
+    processed.withholdings_amount = fin['withholdings_total']
+    processed.total_amount = fin['total']
+
+
+def _flag_incomplete_ocr_reading(processed: ProcessedDocument, currency: str) -> None:
+    if not processed.total_amount:
+        processed.requires_review = True
+        processed.review_reasons.append('No se identificó el monto total.')
+    if not processed.issued_at:
+        processed.requires_review = True
+        processed.review_reasons.append('No se identificó la fecha de emisión.')
+    if not processed.supplier_name:
+        processed.requires_review = True
+        processed.review_reasons.append('No se identificó el nombre del proveedor.')
+
+    if processed.subtotal_amount and processed.tax_amount and processed.total_amount:
+        expected = processed.subtotal_amount + processed.tax_amount - (processed.discount_amount or Decimal('0')) + (processed.tip_amount or Decimal('0'))
+        diff = abs(expected - processed.total_amount)
+        tolerance = Decimal('2.00') if currency == 'COP' else Decimal('0.50')
+        if diff > tolerance:
+            processed.requires_review = True
+            processed.review_reasons.append('La suma de subtotal + impuestos no coincide exactamente con el total.')
+
+
 class DocumentProcessor:
     def __init__(self, ocr_service_name: Optional[str] = None):
         self.ocr_service_name = ocr_service_name or getattr(settings, 'OCR_SERVICE', 'gemini')
@@ -636,17 +681,7 @@ class DocumentProcessor:
         processed.document_type = _find_document_type(text, lines, original_filename, has_cufe=has_cufe) or document_type_hint
         processed.document_number = _find_document_number(text, lines)
 
-        processed.supplier_name = _find_supplier_name(lines, text)
-        processed.supplier_address = _find_supplier_address(lines)
-        processed.supplier_phone = _find_supplier_phone(lines, text)
-
-        email_matches = re.findall(r'\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b', text)
-        if email_matches:
-            processed.supplier_email = email_matches[0].lower()
-
-        url_matches = re.findall(r'\b(?:https?://)?(?:www\.)?[A-Za-z0-9\-]+\.[A-Za-z]{2,}(?:/[^\s]*)?\b', text)
-        if url_matches:
-            processed.supplier_website = url_matches[0]
+        _read_supplier_contact(processed, lines, text)
 
         issued_dt, issue_date_str, issue_time_str = _find_spanish_datetime(text, lines)
         processed.issued_at = issued_dt
@@ -656,15 +691,7 @@ class DocumentProcessor:
         currency = _find_currency(text, lines, has_nit=bool(nit_base), has_cufe=bool(cufe))
         processed.currency = currency
 
-        fin = _find_financial_breakdown(lines, currency=currency)
-        processed.subtotal_amount = fin['subtotal']
-        processed.tax_amount = fin['tax_amount']
-        processed.iva_amount = fin['iva_amount']
-        processed.discount_amount = fin['discount_amount']
-        processed.tip_amount = fin['tip_amount']
-        processed.withholdings = fin['withholdings']
-        processed.withholdings_amount = fin['withholdings_total']
-        processed.total_amount = fin['total']
+        _apply_financial_breakdown(processed, _find_financial_breakdown(lines, currency=currency))
 
         processed.payment_method = _find_payment_method(text, lines) or Document.PAYMENT_METHOD_OTHER
 
@@ -680,25 +707,7 @@ class DocumentProcessor:
         if gemini_data and isinstance(gemini_data, dict):
             _merge_gemini_fallback(processed, gemini_data, currency)
 
-
-        if not processed.total_amount:
-            processed.requires_review = True
-            processed.review_reasons.append('No se identificó el monto total.')
-        if not processed.issued_at:
-            processed.requires_review = True
-            processed.review_reasons.append('No se identificó la fecha de emisión.')
-        if not processed.supplier_name:
-            processed.requires_review = True
-            processed.review_reasons.append('No se identificó el nombre del proveedor.')
-
-        if processed.subtotal_amount and processed.tax_amount and processed.total_amount:
-            expected = processed.subtotal_amount + processed.tax_amount - (processed.discount_amount or Decimal('0')) + (processed.tip_amount or Decimal('0'))
-            diff = abs(expected - processed.total_amount)
-            tolerance = Decimal('2.00') if currency == 'COP' else Decimal('0.50')
-            if diff > tolerance:
-                processed.requires_review = True
-                processed.review_reasons.append('La suma de subtotal + impuestos no coincide exactamente con el total.')
-
+        _flag_incomplete_ocr_reading(processed, currency)
         return processed
 
 
