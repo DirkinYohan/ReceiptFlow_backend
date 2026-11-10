@@ -28,7 +28,7 @@ services:
       - key: DJANGO_DEBUG
         value: "False"
       - key: DJANGO_ALLOWED_HOSTS
-        value: localhost
+        value: localhost,api.receiptflow.online
       - key: WEB_CONCURRENCY
         value: "2"
       - key: DOCUMENT_BACKGROUND_THREADS
